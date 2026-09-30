@@ -268,6 +268,8 @@ describe("/mcp hardening", () => {
     assert.equal(reply.status, 200);
     assert.match(String(reply.headers["content-type"]), /text\/html/);
     assert.match(reply.body, /Simulated Alexa\+ page/);
+    assert.match(reply.body, /scripted router/i);
+    assert.match(reply.body, /fetch\("\/mcp"/);
   });
 
   it("keeps /health free of user data", async () => {

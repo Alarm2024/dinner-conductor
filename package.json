@@ -12,7 +12,8 @@
     "start": "tsx src/index.ts",
     "typecheck": "tsc --noEmit",
     "test": "tsx --test tests/*.test.ts && sh scripts/banned-words.sh",
-    "check:words": "sh scripts/banned-words.sh"
+    "check:words": "sh scripts/banned-words.sh",
+    "smoke": "sh scripts/smoke.sh"
   },
   "dependencies": {
     "@modelcontextprotocol/node": "^2.1.0",

@@ -165,12 +165,10 @@ function parseDishList(
 
 function planPayload(plan: { plan_id: string; plan_token: string; result: import("./solver.js").SolverResult }) {
   const r = plan.result;
-  return {
+  const payload: ToolPayload = {
     plan_id: plan.plan_id,
     plan_token: plan.plan_token,
     feasible: r.feasible,
-    reason: r.reason,
-    question: r.question,
     steps: r.steps,
     warnings: r.warnings,
     summary: r.summary,
@@ -178,6 +176,9 @@ function planPayload(plan: { plan_id: string; plan_token: string; result: import
     serve_at_local: r.serve_at_local,
     timezone: r.timezone,
   };
+  if (r.reason) payload.reason = r.reason;
+  if (r.question) payload.question = r.question;
+  return payload;
 }
 
 function stepMinutesUntil(at: string, nowLocal: string): number {
@@ -286,6 +287,9 @@ export function createDinnerConductorServer(): McpServer {
         warnings: z.array(z.string()).optional(),
         question: z.string().optional(),
         reason: z.string().optional(),
+        serve_at_local: z.string().optional(),
+        timezone: z.string().optional(),
+        changed: z.string().optional(),
         ...commonOut,
       }),
       annotations: MUTABLE,
@@ -430,9 +434,15 @@ export function createDinnerConductorServer(): McpServer {
       }),
       outputSchema: z.object({
         plan_id: z.string().optional(),
+        plan_token: z.string().optional(),
         changed: z.string().optional(),
         steps: z.array(z.record(z.string(), z.unknown())).optional(),
+        warnings: z.array(z.string()).optional(),
         feasible: z.boolean().optional(),
+        reason: z.string().optional(),
+        question: z.string().optional(),
+        serve_at_local: z.string().optional(),
+        timezone: z.string().optional(),
         ...commonOut,
       }),
       annotations: MUTABLE,
@@ -491,8 +501,14 @@ export function createDinnerConductorServer(): McpServer {
       }),
       outputSchema: z.object({
         plan_id: z.string().optional(),
+        plan_token: z.string().optional(),
         steps: z.array(z.record(z.string(), z.unknown())).optional(),
+        warnings: z.array(z.string()).optional(),
         feasible: z.boolean().optional(),
+        reason: z.string().optional(),
+        question: z.string().optional(),
+        serve_at_local: z.string().optional(),
+        timezone: z.string().optional(),
         ...commonOut,
       }),
       annotations: MUTABLE,
@@ -549,8 +565,14 @@ export function createDinnerConductorServer(): McpServer {
       }),
       outputSchema: z.object({
         plan_id: z.string().optional(),
+        plan_token: z.string().optional(),
         steps: z.array(z.record(z.string(), z.unknown())).optional(),
+        warnings: z.array(z.string()).optional(),
         feasible: z.boolean().optional(),
+        reason: z.string().optional(),
+        question: z.string().optional(),
+        serve_at_local: z.string().optional(),
+        timezone: z.string().optional(),
         ...commonOut,
       }),
       annotations: READ_ONLY,
@@ -579,7 +601,12 @@ export function createDinnerConductorServer(): McpServer {
         plan_id: z.string().optional(),
         plan_token: z.string().optional(),
         steps: z.array(z.record(z.string(), z.unknown())).optional(),
+        warnings: z.array(z.string()).optional(),
         feasible: z.boolean().optional(),
+        reason: z.string().optional(),
+        question: z.string().optional(),
+        serve_at_local: z.string().optional(),
+        timezone: z.string().optional(),
         ...commonOut,
       }),
       annotations: MUTABLE,

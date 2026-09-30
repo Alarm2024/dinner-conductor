@@ -1,0 +1,645 @@
+{
+  "dishes": [
+    {
+      "id": "roast_chicken",
+      "names": ["roast chicken", "roasted chicken", "whole chicken", "chicken roast"],
+      "prep_min": 20,
+      "hands_on": [
+        { "offset_min": 0, "minutes": 20, "label": "season and truss" },
+        { "offset_min": 50, "minutes": 5, "label": "baste" }
+      ],
+      "cook_min": { "typical": 75, "low": 60, "high": 90 },
+      "appliance": "oven",
+      "oven_temp": { "f": 425, "c": 220 },
+      "oven_units": 1,
+      "burners": 0,
+      "rest_min": 15,
+      "hold_min": 30
+    },
+    {
+      "id": "turkey_breast",
+      "names": ["turkey breast", "roast turkey breast", "turkey"],
+      "prep_min": 15,
+      "hands_on": [
+        { "offset_min": 0, "minutes": 15, "label": "season turkey" }
+      ],
+      "cook_min": { "typical": 90, "low": 75, "high": 120 },
+      "appliance": "oven",
+      "oven_temp": { "f": 325, "c": 165 },
+      "oven_units": 1,
+      "burners": 0,
+      "rest_min": 20,
+      "hold_min": 40
+    },
+    {
+      "id": "roast_potatoes",
+      "names": ["roast potatoes", "roasted potatoes", "oven potatoes"],
+      "prep_min": 15,
+      "hands_on": [
+        { "offset_min": 0, "minutes": 15, "label": "cut and toss" },
+        { "offset_min": 40, "minutes": 5, "label": "turn potatoes" }
+      ],
+      "cook_min": { "typical": 45, "low": 35, "high": 55 },
+      "appliance": "oven",
+      "oven_temp": { "f": 425, "c": 220 },
+      "oven_units": 1,
+      "burners": 0,
+      "rest_min": 0,
+      "hold_min": 25
+    },
+    {
+      "id": "mashed_potatoes",
+      "names": ["mashed potatoes", "mash", "potato mash"],
+      "prep_min": 10,
+      "hands_on": [
+        { "offset_min": 0, "minutes": 10, "label": "peel and cut" },
+        { "offset_min": 30, "minutes": 8, "label": "drain and mash" }
+      ],
+      "cook_min": { "typical": 20, "low": 15, "high": 25 },
+      "appliance": "stovetop",
+      "oven_temp": null,
+      "oven_units": 0,
+      "burners": 1,
+      "rest_min": 0,
+      "hold_min": 30
+    },
+    {
+      "id": "rice",
+      "names": ["rice", "white rice", "steamed rice"],
+      "prep_min": 5,
+      "hands_on": [
+        { "offset_min": 0, "minutes": 5, "label": "rinse and measure" }
+      ],
+      "cook_min": { "typical": 18, "low": 15, "high": 22 },
+      "appliance": "stovetop",
+      "oven_temp": null,
+      "oven_units": 0,
+      "burners": 1,
+      "rest_min": 5,
+      "hold_min": 25
+    },
+    {
+      "id": "pasta",
+      "names": ["pasta", "spaghetti", "noodles"],
+      "prep_min": 5,
+      "hands_on": [
+        { "offset_min": 0, "minutes": 5, "label": "boil water and salt" },
+        { "offset_min": 15, "minutes": 2, "label": "drain pasta" }
+      ],
+      "cook_min": { "typical": 10, "low": 8, "high": 12 },
+      "appliance": "stovetop",
+      "oven_temp": null,
+      "oven_units": 0,
+      "burners": 1,
+      "rest_min": 0,
+      "hold_min": 10
+    },
+    {
+      "id": "green_beans",
+      "names": ["green beans", "beans", "steamed green beans"],
+      "prep_min": 10,
+      "hands_on": [
+        { "offset_min": 0, "minutes": 10, "label": "trim beans" }
+      ],
+      "cook_min": { "typical": 8, "low": 5, "high": 12 },
+      "appliance": "stovetop",
+      "oven_temp": null,
+      "oven_units": 0,
+      "burners": 1,
+      "rest_min": 0,
+      "hold_min": 15
+    },
+    {
+      "id": "roast_vegetables",
+      "names": ["roast vegetables", "roasted vegetables", "roasted veggies", "oven vegetables"],
+      "prep_min": 15,
+      "hands_on": [
+        { "offset_min": 0, "minutes": 15, "label": "chop and toss" }
+      ],
+      "cook_min": { "typical": 35, "low": 25, "high": 45 },
+      "appliance": "oven",
+      "oven_temp": { "f": 425, "c": 220 },
+      "oven_units": 1,
+      "burners": 0,
+      "rest_min": 0,
+      "hold_min": 20
+    },
+    {
+      "id": "stuffing",
+      "names": ["stuffing", "dressing", "bread stuffing"],
+      "prep_min": 20,
+      "hands_on": [
+        { "offset_min": 0, "minutes": 20, "label": "mix stuffing" }
+      ],
+      "cook_min": { "typical": 35, "low": 30, "high": 45 },
+      "appliance": "oven",
+      "oven_temp": { "f": 350, "c": 175 },
+      "oven_units": 1,
+      "burners": 0,
+      "rest_min": 0,
+      "hold_min": 30
+    },
+    {
+      "id": "dinner_rolls",
+      "names": ["dinner rolls", "rolls", "yeast rolls"],
+      "prep_min": 15,
+      "hands_on": [
+        { "offset_min": 0, "minutes": 15, "label": "shape rolls" }
+      ],
+      "cook_min": { "typical": 18, "low": 15, "high": 22 },
+      "appliance": "oven",
+      "oven_temp": { "f": 375, "c": 190 },
+      "oven_units": 1,
+      "burners": 0,
+      "rest_min": 0,
+      "hold_min": 20
+    },
+    {
+      "id": "gravy",
+      "names": ["gravy", "pan gravy", "turkey gravy"],
+      "prep_min": 5,
+      "hands_on": [
+        { "offset_min": 0, "minutes": 5, "label": "start gravy" },
+        { "offset_min": 5, "minutes": 10, "label": "whisk gravy" }
+      ],
+      "cook_min": { "typical": 15, "low": 10, "high": 20 },
+      "appliance": "stovetop",
+      "oven_temp": null,
+      "oven_units": 0,
+      "burners": 1,
+      "rest_min": 0,
+      "hold_min": 30
+    },
+    {
+      "id": "salad",
+      "names": ["salad", "green salad", "side salad", "garden salad"],
+      "prep_min": 15,
+      "hands_on": [
+        { "offset_min": 0, "minutes": 15, "label": "wash and dress" }
+      ],
+      "cook_min": { "typical": 0, "low": 0, "high": 0 },
+      "appliance": "none",
+      "oven_temp": null,
+      "oven_units": 0,
+      "burners": 0,
+      "rest_min": 0,
+      "hold_min": 45
+    },
+    {
+      "id": "garlic_bread",
+      "names": ["garlic bread", "garlic toast"],
+      "prep_min": 8,
+      "hands_on": [
+        { "offset_min": 0, "minutes": 8, "label": "butter and season" }
+      ],
+      "cook_min": { "typical": 12, "low": 8, "high": 15 },
+      "appliance": "oven",
+      "oven_temp": { "f": 375, "c": 190 },
+      "oven_units": 1,
+      "burners": 0,
+      "rest_min": 0,
+      "hold_min": 15
+    },
+    {
+      "id": "baked_salmon",
+      "names": ["baked salmon", "salmon", "roast salmon"],
+      "prep_min": 10,
+      "hands_on": [
+        { "offset_min": 0, "minutes": 10, "label": "season salmon" }
+      ],
+      "cook_min": { "typical": 18, "low": 12, "high": 25 },
+      "appliance": "oven",
+      "oven_temp": { "f": 400, "c": 200 },
+      "oven_units": 1,
+      "burners": 0,
+      "rest_min": 5,
+      "hold_min": 15
+    },
+    {
+      "id": "meatloaf",
+      "names": ["meatloaf", "meat loaf"],
+      "prep_min": 20,
+      "hands_on": [
+        { "offset_min": 0, "minutes": 20, "label": "mix and shape" }
+      ],
+      "cook_min": { "typical": 60, "low": 50, "high": 75 },
+      "appliance": "oven",
+      "oven_temp": { "f": 350, "c": 175 },
+      "oven_units": 1,
+      "burners": 0,
+      "rest_min": 10,
+      "hold_min": 25
+    },
+    {
+      "id": "lasagna",
+      "names": ["lasagna", "lasagne"],
+      "prep_min": 30,
+      "hands_on": [
+        { "offset_min": 0, "minutes": 30, "label": "assemble lasagna" }
+      ],
+      "cook_min": { "typical": 50, "low": 40, "high": 60 },
+      "appliance": "oven",
+      "oven_temp": { "f": 375, "c": 190 },
+      "oven_units": 1,
+      "burners": 0,
+      "rest_min": 15,
+      "hold_min": 30
+    },
+    {
+      "id": "apple_pie",
+      "names": ["apple pie", "pie", "fruit pie"],
+      "prep_min": 25,
+      "hands_on": [
+        { "offset_min": 0, "minutes": 25, "label": "fill and crimp" }
+      ],
+      "cook_min": { "typical": 50, "low": 40, "high": 60 },
+      "appliance": "oven",
+      "oven_temp": { "f": 375, "c": 190 },
+      "oven_units": 1,
+      "burners": 0,
+      "rest_min": 30,
+      "hold_min": 120
+    },
+    {
+      "id": "ham",
+      "names": ["ham", "baked ham", "glazed ham"],
+      "prep_min": 10,
+      "hands_on": [
+        { "offset_min": 0, "minutes": 10, "label": "score and glaze" },
+        { "offset_min": 70, "minutes": 5, "label": "reglaze" }
+      ],
+      "cook_min": { "typical": 90, "low": 75, "high": 120 },
+      "appliance": "oven",
+      "oven_temp": { "f": 325, "c": 165 },
+      "oven_units": 1,
+      "burners": 0,
+      "rest_min": 15,
+      "hold_min": 45
+    },
+    {
+      "id": "pork_loin",
+      "names": ["pork loin", "roast pork", "pork roast"],
+      "prep_min": 15,
+      "hands_on": [
+        { "offset_min": 0, "minutes": 15, "label": "season pork" }
+      ],
+      "cook_min": { "typical": 70, "low": 55, "high": 90 },
+      "appliance": "oven",
+      "oven_temp": { "f": 375, "c": 190 },
+      "oven_units": 1,
+      "burners": 0,
+      "rest_min": 15,
+      "hold_min": 30
+    },
+    {
+      "id": "roast_beef",
+      "names": ["roast beef", "beef roast", "standing rib"],
+      "prep_min": 15,
+      "hands_on": [
+        { "offset_min": 0, "minutes": 15, "label": "season beef" }
+      ],
+      "cook_min": { "typical": 90, "low": 60, "high": 120 },
+      "appliance": "oven",
+      "oven_temp": { "f": 350, "c": 175 },
+      "oven_units": 1,
+      "burners": 0,
+      "rest_min": 20,
+      "hold_min": 35
+    },
+    {
+      "id": "baked_mac_and_cheese",
+      "names": ["mac and cheese", "baked mac and cheese", "macaroni and cheese"],
+      "prep_min": 20,
+      "hands_on": [
+        { "offset_min": 0, "minutes": 20, "label": "cook pasta and sauce" }
+      ],
+      "cook_min": { "typical": 25, "low": 20, "high": 35 },
+      "appliance": "oven",
+      "oven_temp": { "f": 350, "c": 175 },
+      "oven_units": 1,
+      "burners": 1,
+      "rest_min": 5,
+      "hold_min": 25
+    },
+    {
+      "id": "corn_on_the_cob",
+      "names": ["corn on the cob", "corn", "boiled corn"],
+      "prep_min": 5,
+      "hands_on": [
+        { "offset_min": 0, "minutes": 5, "label": "husk corn" }
+      ],
+      "cook_min": { "typical": 8, "low": 6, "high": 12 },
+      "appliance": "stovetop",
+      "oven_temp": null,
+      "oven_units": 0,
+      "burners": 1,
+      "rest_min": 0,
+      "hold_min": 15
+    },
+    {
+      "id": "glazed_carrots",
+      "names": ["glazed carrots", "carrots", "honey carrots"],
+      "prep_min": 10,
+      "hands_on": [
+        { "offset_min": 0, "minutes": 10, "label": "peel and cut" },
+        { "offset_min": 20, "minutes": 5, "label": "glaze carrots" }
+      ],
+      "cook_min": { "typical": 15, "low": 12, "high": 20 },
+      "appliance": "stovetop",
+      "oven_temp": null,
+      "oven_units": 0,
+      "burners": 1,
+      "rest_min": 0,
+      "hold_min": 20
+    },
+    {
+      "id": "brussels_sprouts",
+      "names": ["brussels sprouts", "roasted brussels sprouts", "sprouts"],
+      "prep_min": 12,
+      "hands_on": [
+        { "offset_min": 0, "minutes": 12, "label": "trim sprouts" }
+      ],
+      "cook_min": { "typical": 25, "low": 20, "high": 35 },
+      "appliance": "oven",
+      "oven_temp": { "f": 425, "c": 220 },
+      "oven_units": 1,
+      "burners": 0,
+      "rest_min": 0,
+      "hold_min": 20
+    },
+    {
+      "id": "sweet_potato_casserole",
+      "names": ["sweet potato casserole", "sweet potatoes", "yam casserole"],
+      "prep_min": 20,
+      "hands_on": [
+        { "offset_min": 0, "minutes": 20, "label": "mash and top" }
+      ],
+      "cook_min": { "typical": 30, "low": 25, "high": 40 },
+      "appliance": "oven",
+      "oven_temp": { "f": 350, "c": 175 },
+      "oven_units": 1,
+      "burners": 0,
+      "rest_min": 5,
+      "hold_min": 30
+    },
+    {
+      "id": "cranberry_sauce",
+      "names": ["cranberry sauce", "cranberries"],
+      "prep_min": 5,
+      "hands_on": [
+        { "offset_min": 0, "minutes": 5, "label": "combine berries" }
+      ],
+      "cook_min": { "typical": 12, "low": 10, "high": 15 },
+      "appliance": "stovetop",
+      "oven_temp": null,
+      "oven_units": 0,
+      "burners": 1,
+      "rest_min": 30,
+      "hold_min": 240
+    },
+    {
+      "id": "biscuits",
+      "names": ["biscuits", "buttermilk biscuits", "baking powder biscuits"],
+      "prep_min": 15,
+      "hands_on": [
+        { "offset_min": 0, "minutes": 15, "label": "cut biscuits" }
+      ],
+      "cook_min": { "typical": 14, "low": 12, "high": 18 },
+      "appliance": "oven",
+      "oven_temp": { "f": 425, "c": 220 },
+      "oven_units": 1,
+      "burners": 0,
+      "rest_min": 0,
+      "hold_min": 15
+    },
+    {
+      "id": "cornbread",
+      "names": ["cornbread", "corn bread"],
+      "prep_min": 10,
+      "hands_on": [
+        { "offset_min": 0, "minutes": 10, "label": "mix batter" }
+      ],
+      "cook_min": { "typical": 25, "low": 20, "high": 30 },
+      "appliance": "oven",
+      "oven_temp": { "f": 400, "c": 200 },
+      "oven_units": 1,
+      "burners": 0,
+      "rest_min": 5,
+      "hold_min": 30
+    },
+    {
+      "id": "chicken_soup",
+      "names": ["chicken soup", "soup", "broth soup"],
+      "prep_min": 15,
+      "hands_on": [
+        { "offset_min": 0, "minutes": 15, "label": "chop and start pot" }
+      ],
+      "cook_min": { "typical": 30, "low": 20, "high": 45 },
+      "appliance": "stovetop",
+      "oven_temp": null,
+      "oven_units": 0,
+      "burners": 1,
+      "rest_min": 0,
+      "hold_min": 60
+    },
+    {
+      "id": "risotto",
+      "names": ["risotto", "rice risotto"],
+      "prep_min": 10,
+      "hands_on": [
+        { "offset_min": 0, "minutes": 10, "label": "sweat aromatics" },
+        { "offset_min": 10, "minutes": 20, "label": "stir risotto" }
+      ],
+      "cook_min": { "typical": 25, "low": 20, "high": 30 },
+      "appliance": "stovetop",
+      "oven_temp": null,
+      "oven_units": 0,
+      "burners": 1,
+      "rest_min": 0,
+      "hold_min": 10
+    },
+    {
+      "id": "steak",
+      "names": ["steak", "pan steak", "seared steak"],
+      "prep_min": 5,
+      "hands_on": [
+        { "offset_min": 0, "minutes": 5, "label": "season steak" },
+        { "offset_min": 5, "minutes": 10, "label": "sear and baste" }
+      ],
+      "cook_min": { "typical": 10, "low": 6, "high": 14 },
+      "appliance": "stovetop",
+      "oven_temp": null,
+      "oven_units": 0,
+      "burners": 1,
+      "rest_min": 8,
+      "hold_min": 10
+    },
+    {
+      "id": "baked_potato",
+      "names": ["baked potato", "baked potatoes", "jacket potato"],
+      "prep_min": 5,
+      "hands_on": [
+        { "offset_min": 0, "minutes": 5, "label": "scrub and oil" }
+      ],
+      "cook_min": { "typical": 60, "low": 45, "high": 75 },
+      "appliance": "oven",
+      "oven_temp": { "f": 400, "c": 200 },
+      "oven_units": 1,
+      "burners": 0,
+      "rest_min": 0,
+      "hold_min": 30
+    },
+    {
+      "id": "quinoa",
+      "names": ["quinoa"],
+      "prep_min": 5,
+      "hands_on": [
+        { "offset_min": 0, "minutes": 5, "label": "rinse quinoa" }
+      ],
+      "cook_min": { "typical": 15, "low": 12, "high": 20 },
+      "appliance": "stovetop",
+      "oven_temp": null,
+      "oven_units": 0,
+      "burners": 1,
+      "rest_min": 5,
+      "hold_min": 25
+    },
+    {
+      "id": "couscous",
+      "names": ["couscous"],
+      "prep_min": 5,
+      "hands_on": [
+        { "offset_min": 0, "minutes": 5, "label": "measure and pour" }
+      ],
+      "cook_min": { "typical": 5, "low": 5, "high": 8 },
+      "appliance": "stovetop",
+      "oven_temp": null,
+      "oven_units": 0,
+      "burners": 1,
+      "rest_min": 5,
+      "hold_min": 20
+    },
+    {
+      "id": "asparagus",
+      "names": ["asparagus", "roasted asparagus"],
+      "prep_min": 8,
+      "hands_on": [
+        { "offset_min": 0, "minutes": 8, "label": "trim asparagus" }
+      ],
+      "cook_min": { "typical": 12, "low": 8, "high": 15 },
+      "appliance": "oven",
+      "oven_temp": { "f": 425, "c": 220 },
+      "oven_units": 1,
+      "burners": 0,
+      "rest_min": 0,
+      "hold_min": 15
+    },
+    {
+      "id": "cauliflower_gratin",
+      "names": ["cauliflower gratin", "gratin", "cauliflower bake"],
+      "prep_min": 20,
+      "hands_on": [
+        { "offset_min": 0, "minutes": 20, "label": "blanch and sauce" }
+      ],
+      "cook_min": { "typical": 30, "low": 25, "high": 40 },
+      "appliance": "oven",
+      "oven_temp": { "f": 375, "c": 190 },
+      "oven_units": 1,
+      "burners": 1,
+      "rest_min": 5,
+      "hold_min": 25
+    },
+    {
+      "id": "chicken_thighs",
+      "names": ["chicken thighs", "baked chicken thighs", "thighs"],
+      "prep_min": 10,
+      "hands_on": [
+        { "offset_min": 0, "minutes": 10, "label": "season thighs" }
+      ],
+      "cook_min": { "typical": 40, "low": 35, "high": 50 },
+      "appliance": "oven",
+      "oven_temp": { "f": 425, "c": 220 },
+      "oven_units": 1,
+      "burners": 0,
+      "rest_min": 5,
+      "hold_min": 20
+    },
+    {
+      "id": "shrimp_scampi",
+      "names": ["shrimp scampi", "scampi", "garlic shrimp"],
+      "prep_min": 10,
+      "hands_on": [
+        { "offset_min": 0, "minutes": 10, "label": "prep shrimp" },
+        { "offset_min": 10, "minutes": 8, "label": "cook scampi" }
+      ],
+      "cook_min": { "typical": 8, "low": 6, "high": 10 },
+      "appliance": "stovetop",
+      "oven_temp": null,
+      "oven_units": 0,
+      "burners": 1,
+      "rest_min": 0,
+      "hold_min": 10
+    },
+    {
+      "id": "green_bean_casserole",
+      "names": ["green bean casserole", "bean casserole"],
+      "prep_min": 15,
+      "hands_on": [
+        { "offset_min": 0, "minutes": 15, "label": "mix casserole" }
+      ],
+      "cook_min": { "typical": 30, "low": 25, "high": 40 },
+      "appliance": "oven",
+      "oven_temp": { "f": 350, "c": 175 },
+      "oven_units": 1,
+      "burners": 0,
+      "rest_min": 5,
+      "hold_min": 25
+    },
+    {
+      "id": "chocolate_cake",
+      "names": ["chocolate cake", "cake", "layer cake"],
+      "prep_min": 20,
+      "hands_on": [
+        { "offset_min": 0, "minutes": 20, "label": "mix batter" }
+      ],
+      "cook_min": { "typical": 35, "low": 30, "high": 40 },
+      "appliance": "oven",
+      "oven_temp": { "f": 350, "c": 175 },
+      "oven_units": 1,
+      "burners": 0,
+      "rest_min": 60,
+      "hold_min": 240
+    },
+    {
+      "id": "brownies",
+      "names": ["brownies", "chocolate brownies"],
+      "prep_min": 15,
+      "hands_on": [
+        { "offset_min": 0, "minutes": 15, "label": "mix batter" }
+      ],
+      "cook_min": { "typical": 30, "low": 25, "high": 35 },
+      "appliance": "oven",
+      "oven_temp": { "f": 350, "c": 175 },
+      "oven_units": 1,
+      "burners": 0,
+      "rest_min": 20,
+      "hold_min": 180
+    },
+    {
+      "id": "frittata",
+      "names": ["frittata", "egg frittata"],
+      "prep_min": 15,
+      "hands_on": [
+        { "offset_min": 0, "minutes": 15, "label": "chop and whisk" },
+        { "offset_min": 15, "minutes": 8, "label": "stovetop start" }
+      ],
+      "cook_min": { "typical": 15, "low": 12, "high": 20 },
+      "appliance": "oven",
+      "oven_temp": { "f": 375, "c": 190 },
+      "oven_units": 1,
+      "burners": 1,
+      "rest_min": 5,
+      "hold_min": 20
+    }
+  ]
+}

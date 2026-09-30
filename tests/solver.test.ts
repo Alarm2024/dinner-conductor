@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { loadDishes } from "../src/dishes.js";
+import { getDishById, loadDishes } from "../src/dishes.js";
 import {
   formatLocalTime,
   parseServeAt,
@@ -30,15 +30,12 @@ function localToMs(hhmm: string, serveMs: number, timeZone: string): number {
   const [hh, mm] = hhmm.split(":").map(Number);
   const serveLocal = formatLocalTime(serveMs, timeZone);
   const [sh, sm] = serveLocal.split(":").map(Number);
-  const serveMins = sh * 60 + sm;
-  let mins = hh * 60 + mm;
-  // Steps are on the serve day; if a clock time is after serve, it is still same civil day before midnight.
-  const deltaMin = mins - serveMins;
+  const deltaMin = hh * 60 + mm - (sh * 60 + sm);
   return serveMs + deltaMin * 60_000;
 }
 
+/** Independent check of resource rules from published steps + the dish library. */
 function assertResourceInvariants(result: SolverResult, input: SolverInput): void {
-  assert.ok(result.steps.length > 0);
   assert.ok(result.summary.length > 0);
   assert.ok(result.card.some((l) => /thermometer/i.test(l)));
   const times = result.steps.map((s) => s.at);
@@ -46,47 +43,99 @@ function assertResourceInvariants(result: SolverResult, input: SolverInput): voi
   if (!result.feasible) return;
 
   const serveMs = parseServeAt(input.serve_at, input.timezone, NOW);
-  const dishIds = input.dishes.map((d) => d.id);
-
-  // Hands-on concurrency from step flags.
-  type Seg = { start: number; end: number; id: string };
-  const hands: Seg[] = [];
-  for (let i = 0; i < result.steps.length; i++) {
-    const s = result.steps[i]!;
-    if (!s.hands_on || s.dish_id === "meal") continue;
-    const start = localToMs(s.at, serveMs, input.timezone);
-    // End at next step for same dish or +5 min fallback.
-    let end = start + 5 * 60_000;
-    for (let j = i + 1; j < result.steps.length; j++) {
-      const n = result.steps[j]!;
-      if (n.dish_id === s.dish_id) {
-        end = localToMs(n.at, serveMs, input.timezone);
-        break;
-      }
-    }
-    hands.push({ start, end, id: s.dish_id });
-  }
-  const events: Array<{ t: number; d: number }> = [];
-  for (const h of hands) {
-    events.push({ t: h.start, d: 1 });
-    events.push({ t: h.end, d: -1 });
-  }
-  events.sort((a, b) => a.t - b.t || a.d - b.d);
-  let active = 0;
-  for (const e of events) {
-    active += e.d;
-    assert.ok(active <= input.cooks, `hands-on exceeds cooks=${input.cooks}`);
-  }
-
-  // Every dish appears and has a ready/hold before or at serve.
-  for (const id of dishIds) {
-    assert.ok(result.steps.some((s) => s.dish_id === id), `missing ${id}`);
-    const ready = result.steps.find(
-      (s) => s.dish_id === id && (s.action.includes("ready") || s.action.startsWith("Hold")),
+  type Place = {
+    id: string;
+    start: number;
+    ready: number;
+    prep: number;
+    cook: number;
+    hold: number;
+    appliance: string;
+    temp_f: number | null;
+    units: number;
+    burners: number;
+    hands: Array<{ o: number; m: number }>;
+  };
+  const places: Place[] = [];
+  for (const d of input.dishes) {
+    const base = getDishById(d.id)!;
+    const cook = d.overrides?.cook_min ?? base.cook_min.typical;
+    const prep = d.overrides?.prep_min ?? base.prep_min;
+    const rest = d.overrides?.rest_min ?? base.rest_min;
+    const hold = d.overrides?.hold_min ?? base.hold_min;
+    const readyStep = result.steps.find(
+      (s) => s.dish_id === d.id && (s.action.includes("ready") || s.action.startsWith("Hold")),
     );
-    assert.ok(ready, `no ready/hold for ${id}`);
-    const readyMs = localToMs(ready!.at, serveMs, input.timezone);
-    assert.ok(readyMs <= serveMs + 60_000, `${id} ready after serve`);
+    assert.ok(readyStep, `missing ready for ${d.id}`);
+    const ready = localToMs(readyStep!.at, serveMs, input.timezone);
+    const start = ready - (prep + cook + rest) * 60_000;
+    assert.ok(ready <= serveMs + 1000, `${d.id} after serve`);
+    assert.ok(ready >= serveMs - hold * 60_000 - 1000, `${d.id} outside hold`);
+    places.push({
+      id: d.id,
+      start,
+      ready,
+      prep,
+      cook,
+      hold,
+      appliance: base.appliance,
+      temp_f: d.overrides?.oven_temp_f ?? base.oven_temp?.f ?? null,
+      units: d.overrides?.oven_units ?? base.oven_units,
+      burners: d.overrides?.burners ?? base.burners,
+      hands: base.hands_on.map((h) => ({ o: h.offset_min, m: h.minutes })),
+    });
+  }
+
+  const handEvents: Array<{ t: number; d: number }> = [];
+  for (const p of places) {
+    for (const h of p.hands) {
+      if (h.m <= 0) continue;
+      handEvents.push({ t: p.start + h.o * 60_000, d: 1 });
+      handEvents.push({ t: p.start + (h.o + h.m) * 60_000, d: -1 });
+    }
+  }
+  handEvents.sort((a, b) => a.t - b.t || a.d - b.d);
+  let handsOn = 0;
+  for (const e of handEvents) {
+    handsOn += e.d;
+    assert.ok(handsOn <= input.cooks, `hands-on ${handsOn} > cooks ${input.cooks}`);
+  }
+
+  const bEvents: Array<{ t: number; d: number }> = [];
+  for (const p of places) {
+    if (p.burners <= 0) continue;
+    if (p.appliance === "stovetop") {
+      const s = p.start + p.prep * 60_000;
+      const e = s + p.cook * 60_000;
+      bEvents.push({ t: s, d: p.burners }, { t: e, d: -p.burners });
+    } else if (p.prep > 0) {
+      bEvents.push({ t: p.start, d: p.burners }, { t: p.start + p.prep * 60_000, d: -p.burners });
+    }
+  }
+  bEvents.sort((a, b) => a.t - b.t || a.d - b.d);
+  let burners = 0;
+  for (const e of bEvents) {
+    burners += e.d;
+    assert.ok(burners <= input.burners, `burners ${burners} > ${input.burners}`);
+  }
+
+  const ovenDishes = places.filter((p) => p.appliance === "oven" && p.cook > 0);
+  const oEvents: Array<{ t: number; open: boolean; id: string; temp: number; units: number }> = [];
+  for (const p of ovenDishes) {
+    const s = p.start + p.prep * 60_000;
+    const e = s + p.cook * 60_000;
+    oEvents.push({ t: s, open: true, id: p.id, temp: p.temp_f ?? 0, units: p.units });
+    oEvents.push({ t: e, open: false, id: p.id, temp: p.temp_f ?? 0, units: p.units });
+  }
+  oEvents.sort((a, b) => a.t - b.t || Number(a.open) - Number(b.open) || a.id.localeCompare(b.id));
+  const active = new Map<string, { temp: number; units: number }>();
+  for (const ev of oEvents) {
+    if (ev.open) active.set(ev.id, { temp: ev.temp, units: ev.units });
+    else active.delete(ev.id);
+    const temps = new Set([...active.values()].map((v) => v.temp));
+    const units = [...active.values()].reduce((n, v) => n + v.units, 0);
+    assert.ok(temps.size <= input.ovens, `oven temps ${temps.size} > ovens ${input.ovens}`);
+    assert.ok(units <= input.ovens * 2, `oven units ${units} > ${input.ovens * 2}`);
   }
 }
 
@@ -104,7 +153,6 @@ describe("solver golden plans", () => {
     assert.ok(plan.steps.some((s) => s.action === "Serve"));
     assert.match(plan.summary, /18:00/);
     assertResourceInvariants(plan, input);
-    // Same oven temp (425 F) — both oven dishes can share.
     const bakeTemps = plan.steps.filter((s) => s.temp).map((s) => s.temp);
     assert.ok(bakeTemps.every((t) => t === "425 F"));
   });
@@ -125,15 +173,14 @@ describe("solver golden plans", () => {
       serve_at: "16:00",
     });
     const plan = solveMeal(input, NOW);
-    // Turkey 325, stuffing 350, rolls 375, casserole 350 — must sequence or ask.
     if (plan.feasible) {
       assert.ok(plan.steps.some((s) => s.dish_id === "turkey_breast"));
       assert.ok(plan.steps.some((s) => s.dish_id === "stuffing"));
       assert.ok(plan.card.length > 3);
+      assertResourceInvariants(plan, input);
     } else {
       assert.ok(plan.question);
       assert.ok(plan.reason);
-      // One question, plain language.
       assert.equal((plan.question.match(/\?/g) ?? []).length, 1);
     }
     assert.equal(stablePlanFingerprint(plan), stablePlanFingerprint(solveMeal(input, NOW)));
@@ -149,6 +196,7 @@ describe("solver golden plans", () => {
     assert.equal(plan.feasible, true, plan.reason ?? plan.summary);
     assert.ok(plan.steps.some((s) => s.temp === "325 F"));
     assert.ok(plan.steps.some((s) => s.temp === "425 F"));
+    assertResourceInvariants(plan, input);
   });
 
   it("uses 2 cooks to overlap hands-on prep", () => {
@@ -169,7 +217,6 @@ describe("solver golden plans", () => {
       NOW,
     );
     assert.equal(twoCooks.feasible, true, twoCooks.reason ?? twoCooks.summary);
-    // Two cooks should be feasible; one cook may need sequencing via hold.
     assert.ok(oneCook.feasible || oneCook.question);
   });
 });
@@ -205,7 +252,6 @@ describe("solver determinism and properties", () => {
       cooks: 1,
     });
     const plan = solveMeal(input, NOW);
-    // Zero hold + different temps + long cooks should fail or sequence inadequately.
     if (!plan.feasible) {
       assert.ok(plan.question?.endsWith("?"));
       assert.ok(plan.reason);
@@ -224,13 +270,12 @@ describe("solver property tests (500 random dish sets)", () => {
     let feasibleCount = 0;
     const RUNS = 500;
     for (let seed = 0; seed < RUNS; seed++) {
-      // Deterministic LCG
       let state = (seed * 1103515245 + 12345) >>> 0;
       const rand = () => {
         state = (state * 1103515245 + 12345) >>> 0;
         return state / 0x100000000;
       };
-      const n = 2 + Math.floor(rand() * 5); // 2..6 dishes
+      const n = 2 + Math.floor(rand() * 5);
       const picked: string[] = [];
       const used = new Set<string>();
       while (picked.length < n) {
@@ -254,15 +299,9 @@ describe("solver property tests (500 random dish sets)", () => {
 
       if (a.feasible) {
         feasibleCount += 1;
-        // Hands-on: no more than cooks concurrent — approximate from steps flagged hands_on.
-        // Oven temps: at each bake step time, conflicting temps should not both be "active"
-        // without a second oven. Full check re-solved already by solver; spot-check serve card.
         assert.ok(a.steps.some((s) => s.action === "Serve"));
         for (const id of picked) {
-          assert.ok(
-            a.steps.some((s) => s.dish_id === id),
-            `seed ${seed} missing ${id}`,
-          );
+          assert.ok(a.steps.some((s) => s.dish_id === id), `seed ${seed} missing ${id}`);
         }
       } else {
         assert.ok(a.question, `seed ${seed} infeasible without question`);

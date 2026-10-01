@@ -69,7 +69,9 @@ function assertResourceInvariants(result: SolverResult, input: SolverInput): voi
     );
     assert.ok(readyStep, `missing ready for ${d.id}`);
     const ready = localToMs(readyStep!.at, serveMs, input.timezone);
-    const start = ready - (prep + cook + rest) * 60_000;
+    const lastHands = Math.max(0, ...base.hands_on.map((h) => h.offset_min + h.minutes));
+    const total = Math.max(prep + cook + rest, lastHands);
+    const start = ready - total * 60_000;
     assert.ok(ready <= serveMs + 1000, `${d.id} after serve`);
     assert.ok(ready >= serveMs - hold * 60_000 - 1000, `${d.id} outside hold`);
     places.push({
@@ -310,6 +312,54 @@ describe("solver property tests (500 random dish sets)", () => {
       }
     }
     assert.ok(feasibleCount > 50, `expected many feasible plans, got ${feasibleCount}`);
+  });
+
+  it("no hands-on work ends after serve_at when feasible", () => {
+    const library = loadDishes();
+    for (let seed = 0; seed < 100; seed++) {
+      let state = (seed * 1103515245 + 12345) >>> 0;
+      const rand = () => {
+        state = (state * 1103515245 + 12345) >>> 0;
+        return state / 0x100000000;
+      };
+      const n = 2 + Math.floor(rand() * 4);
+      const picked: string[] = [];
+      const used = new Set<string>();
+      while (picked.length < n) {
+        const d = library[Math.floor(rand() * library.length)]!;
+        if (used.has(d.id)) continue;
+        used.add(d.id);
+        picked.push(d.id);
+      }
+      picked.sort();
+      const input = baseInput({
+        dishes: picked.map((id) => ({ id })),
+        ovens: 2,
+        cooks: 2,
+        serve_at: "19:00",
+      });
+      const plan = solveMeal(input, NOW);
+      if (!plan.feasible) continue;
+      const serveMs = parseServeAt(input.serve_at, input.timezone, NOW);
+      for (const d of input.dishes) {
+        const base = getDishById(d.id)!;
+        const readyStep = plan.steps.find(
+          (s) => s.dish_id === d.id && (s.action.includes("ready") || s.action.startsWith("Hold")),
+        );
+        assert.ok(readyStep, d.id);
+        const ready = localToMs(readyStep!.at, serveMs, input.timezone);
+        const prep = d.overrides?.prep_min ?? base.prep_min;
+        const cook = d.overrides?.cook_min ?? base.cook_min.typical;
+        const rest = d.overrides?.rest_min ?? base.rest_min;
+        const lastHands = Math.max(0, ...base.hands_on.map((h) => h.offset_min + h.minutes));
+        const total = Math.max(prep + cook + rest, lastHands);
+        const start = ready - total * 60_000;
+        for (const h of base.hands_on) {
+          const end = start + (h.offset_min + h.minutes) * 60_000;
+          assert.ok(end <= serveMs + 1000, `seed ${seed} ${d.id} hands-on after serve`);
+        }
+      }
+    }
   });
 });
 

@@ -57,4 +57,17 @@ describe("dish library", () => {
     const summary = typicalSummary(mash[0]!.dish);
     assert.match(summary, /Your recipe's times win/);
   });
+
+  it("every hands_on segment ends within prep+cook+rest", () => {
+    for (const dish of loadDishes()) {
+      const total = dish.prep_min + dish.cook_min.typical + dish.rest_min;
+      for (const h of dish.hands_on) {
+        const end = h.offset_min + h.minutes;
+        assert.ok(
+          end <= total,
+          `${dish.id}: hands_on "${h.label}" ends at ${end} > total ${total}`,
+        );
+      }
+    }
+  });
 });

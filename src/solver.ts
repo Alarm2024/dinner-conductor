@@ -197,6 +197,9 @@ function resolveDish(input: PlanDishInput): ResolvedDish {
     const c = o.oven_temp_c ?? (o.oven_temp_f != null ? Math.round(((o.oven_temp_f - 32) * 5) / 9) : null);
     if (f != null && c != null) oven_temp = { f, c };
   }
+  const hands_on = base.hands_on.map((h) => ({ ...h }));
+  const lastHands = Math.max(0, ...hands_on.map((h) => h.offset_min + h.minutes));
+  const total_min = Math.max(prep_min + cook_min + rest_min, lastHands);
   return {
     id: base.id,
     name: base.names[0] ?? base.id,
@@ -204,12 +207,12 @@ function resolveDish(input: PlanDishInput): ResolvedDish {
     cook_min,
     rest_min,
     hold_min,
-    hands_on: base.hands_on.map((h) => ({ ...h })),
+    hands_on,
     appliance: base.appliance,
     oven_temp,
     oven_units: o.oven_units ?? base.oven_units,
     burners: o.burners ?? base.burners,
-    total_min: prep_min + cook_min + rest_min,
+    total_min,
   };
 }
 

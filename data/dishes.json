@@ -55,7 +55,7 @@
         { "offset_min": 0, "minutes": 10, "label": "peel and cut" },
         { "offset_min": 30, "minutes": 8, "label": "drain and mash" }
       ],
-      "cook_min": { "typical": 20, "low": 15, "high": 25 },
+      "cook_min": { "typical": 28, "low": 22, "high": 35 },
       "appliance": "stovetop",
       "oven_temp": null,
       "oven_units": 0,
@@ -86,7 +86,7 @@
         { "offset_min": 0, "minutes": 5, "label": "boil water and salt" },
         { "offset_min": 15, "minutes": 2, "label": "drain pasta" }
       ],
-      "cook_min": { "typical": 10, "low": 8, "high": 12 },
+      "cook_min": { "typical": 12, "low": 10, "high": 14 },
       "appliance": "stovetop",
       "oven_temp": null,
       "oven_units": 0,

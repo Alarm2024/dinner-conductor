@@ -187,6 +187,13 @@ function stepMinutesUntil(at: string, nowLocal: string): number {
   return ah * 60 + am - (nh * 60 + nm);
 }
 
+/** Resolve tool `now` (ISO preferred) to epoch ms; default = server clock. */
+function resolveNowMs(now?: string): number {
+  if (!now) return Date.now();
+  const ms = Date.parse(now);
+  return Number.isFinite(ms) ? ms : Date.now();
+}
+
 export function createDinnerConductorServer(): McpServer {
   const server = new McpServer(
     { name: "dinner-conductor", version: SERVER_VERSION },
@@ -277,6 +284,7 @@ export function createDinnerConductorServer(): McpServer {
         burners: z.number().int().min(1).max(8).optional(),
         cooks: z.number().int().min(1).max(2).optional(),
         units: z.enum(["F", "C"]).optional(),
+        now: z.string().min(1).max(64).optional().describe("ISO timestamp for 'now'; defaults to the server clock"),
       }),
       outputSchema: z.object({
         plan_id: z.string().optional(),
@@ -340,7 +348,7 @@ export function createDinnerConductorServer(): McpServer {
         cooks: args.cooks ?? 1,
         units: (args.units ?? "F") as TempUnits,
       };
-      const result = solveMeal(input);
+      const result = solveMeal(input, resolveNowMs(args.now));
       const plan = storePlan(input, result);
       return toolResult(planPayload(plan));
     }),
@@ -353,7 +361,7 @@ export function createDinnerConductorServer(): McpServer {
       description: `Return the current step, the next step, and minutes until the next one for a plan_id. ${OUT_OF_SCOPE}`,
       inputSchema: z.object({
         plan_id: z.string().min(1).max(64),
-        now: z.string().min(1).max(64).optional().describe("Local HH:MM or ISO; defaults to current time in the plan timezone"),
+        now: z.string().min(1).max(64).optional().describe("ISO timestamp for 'now'; defaults to the server clock"),
       }),
       outputSchema: z.object({
         current: z.record(z.string(), z.unknown()).nullable(),
@@ -375,25 +383,13 @@ export function createDinnerConductorServer(): McpServer {
         });
       }
       const tz = plan.input.timezone;
-      let nowLocal: string;
-      if (now && /^\d{1,2}:\d{2}$/.test(now)) nowLocal = now.padStart(5, "0");
-      else if (now) {
-        const ms = Date.parse(now);
-        nowLocal = Number.isFinite(ms)
-          ? new Intl.DateTimeFormat("en-GB", { timeZone: tz, hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(
-              new Date(ms),
-            )
-          : new Intl.DateTimeFormat("en-GB", { timeZone: tz, hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(
-              new Date(),
-            );
-      } else {
-        nowLocal = new Intl.DateTimeFormat("en-GB", {
-          timeZone: tz,
-          hour: "2-digit",
-          minute: "2-digit",
-          hourCycle: "h23",
-        }).format(new Date());
-      }
+      const nowMs = resolveNowMs(now);
+      const nowLocal = new Intl.DateTimeFormat("en-GB", {
+        timeZone: tz,
+        hour: "2-digit",
+        minute: "2-digit",
+        hourCycle: "h23",
+      }).format(new Date(nowMs));
       const steps = plan.result.steps;
       let current = null;
       let next = null;
@@ -431,6 +427,7 @@ export function createDinnerConductorServer(): McpServer {
         plan_id: z.string().min(1).max(64),
         dish: z.string().min(1).max(64).describe("Dish id or name"),
         minutes: z.number().positive().max(180),
+        now: z.string().min(1).max(64).optional().describe("ISO timestamp for 'now'; defaults to the server clock"),
       }),
       outputSchema: z.object({
         plan_id: z.string().optional(),
@@ -447,7 +444,7 @@ export function createDinnerConductorServer(): McpServer {
       }),
       annotations: MUTABLE,
     },
-    guarded(({ plan_id, dish, minutes }) => {
+    guarded(({ plan_id, dish, minutes, now }) => {
       const plan = getPlan(plan_id);
       if (!plan) {
         return toolResult({
@@ -476,7 +473,7 @@ export function createDinnerConductorServer(): McpServer {
           };
         }),
       };
-      const result = solveMeal(input);
+      const result = solveMeal(input, resolveNowMs(now));
       const updated = replacePlan(plan_id, input, result)!;
       const name = getDishById(dishId)!.names[0];
       const changed = `Added ${minutes} minutes of delay to ${name} prep and rebuilt the timeline; cook times were left as set.`;
@@ -498,6 +495,7 @@ export function createDinnerConductorServer(): McpServer {
         add: z.array(z.union([z.string(), dishRefSchema])).optional(),
         remove: z.array(z.string()).optional(),
         overrides: z.record(z.string(), overrideSchema).optional(),
+        now: z.string().min(1).max(64).optional().describe("ISO timestamp for 'now'; defaults to the server clock"),
       }),
       outputSchema: z.object({
         plan_id: z.string().optional(),
@@ -513,7 +511,7 @@ export function createDinnerConductorServer(): McpServer {
       }),
       annotations: MUTABLE,
     },
-    guarded(({ plan_id, add, remove, overrides }) => {
+    guarded(({ plan_id, add, remove, overrides, now }) => {
       const plan = getPlan(plan_id);
       if (!plan) {
         return toolResult({
@@ -549,7 +547,7 @@ export function createDinnerConductorServer(): McpServer {
         });
       }
       const input: SolverInput = { ...plan.input, dishes };
-      const result = solveMeal(input);
+      const result = solveMeal(input, resolveNowMs(now));
       const updated = replacePlan(plan_id, input, result)!;
       return toolResult(planPayload(updated));
     }),

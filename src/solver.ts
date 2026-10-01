@@ -135,26 +135,52 @@ export function formatLocalTime(ms: number, timeZone: string): string {
   return `${String(p.hour).padStart(2, "0")}:${String(p.minute).padStart(2, "0")}`;
 }
 
-export function parseServeAt(serveAt: string, timeZone: string, nowMs = Date.now()): number {
+export type ServeAtParse =
+  | { ok: true; ms: number; hhmm: string; was_hhmm: boolean; past_today: boolean }
+  | { ok: false; error: string };
+
+/** Parse serve_at. HH:MM is always today in the timezone; past_today is set when that instant is before now. */
+export function parseServeAtDetailed(serveAt: string, timeZone: string, nowMs = Date.now()): ServeAtParse {
   const trimmed = serveAt.trim();
   if (/^\d{1,2}:\d{2}$/.test(trimmed)) {
     const [hh, mm] = trimmed.split(":").map(Number);
+    const hhmm = `${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
     const parts = getZoneParts(new Date(nowMs), timeZone);
-    let ms = zonedLocalToUtcMs(parts.year, parts.month, parts.day, hh, mm, timeZone);
-    if (ms < nowMs - 60_000) {
-      const tomorrow = new Date(Date.UTC(parts.year, parts.month - 1, parts.day + 1));
-      const tp = getZoneParts(tomorrow, "UTC");
-      // Advance civil date by one day in the zone.
-      const localTomorrow = new Date(zonedLocalToUtcMs(parts.year, parts.month, parts.day, 12, 0, timeZone) + 24 * 3600_000);
-      const np = getZoneParts(localTomorrow, timeZone);
-      ms = zonedLocalToUtcMs(np.year, np.month, np.day, hh, mm, timeZone);
-      void tp;
-    }
-    return ms;
+    const ms = zonedLocalToUtcMs(parts.year, parts.month, parts.day, hh, mm, timeZone);
+    return { ok: true, ms, hhmm, was_hhmm: true, past_today: ms < nowMs - 500 };
   }
   const parsed = Date.parse(trimmed);
-  if (Number.isFinite(parsed)) return parsed;
-  throw new Error("bad_serve_at");
+  if (!Number.isFinite(parsed)) return { ok: false, error: "bad_serve_at" };
+  return {
+    ok: true,
+    ms: parsed,
+    hhmm: formatLocalTime(parsed, timeZone),
+    was_hhmm: false,
+    past_today: parsed < nowMs - 500,
+  };
+}
+
+/** Resolve HH:MM or ISO to epoch ms. Rolls HH:MM to tomorrow when already past (legacy helper for tests). */
+export function parseServeAt(serveAt: string, timeZone: string, nowMs = Date.now()): number {
+  const parsed = parseServeAtDetailed(serveAt, timeZone, nowMs);
+  if (!parsed.ok) throw new Error(parsed.error);
+  if (parsed.was_hhmm && parsed.past_today) {
+    const parts = getZoneParts(new Date(parsed.ms), timeZone);
+    const localTomorrow = new Date(zonedLocalToUtcMs(parts.year, parts.month, parts.day, 12, 0, timeZone) + 24 * 3600_000);
+    const np = getZoneParts(localTomorrow, timeZone);
+    const [hh, mm] = parsed.hhmm.split(":").map(Number);
+    return zonedLocalToUtcMs(np.year, np.month, np.day, hh, mm, timeZone);
+  }
+  return parsed.ms;
+}
+
+/** Tomorrow's civil date for the same HH:MM in a timezone. */
+export function tomorrowServeMs(hhmm: string, timeZone: string, nowMs: number): number {
+  const [hh, mm] = hhmm.split(":").map(Number);
+  const parts = getZoneParts(new Date(nowMs), timeZone);
+  const localTomorrow = new Date(zonedLocalToUtcMs(parts.year, parts.month, parts.day, 12, 0, timeZone) + 24 * 3600_000);
+  const np = getZoneParts(localTomorrow, timeZone);
+  return zonedLocalToUtcMs(np.year, np.month, np.day, hh, mm, timeZone);
 }
 
 function resolveDish(input: PlanDishInput): ResolvedDish {
@@ -580,10 +606,8 @@ export function solveMeal(raw: SolverInput, nowMs = Date.now()): SolverResult {
     units: raw.units === "C" ? "C" : "F",
   };
 
-  let serveMs: number;
-  try {
-    serveMs = parseServeAt(input.serve_at, input.timezone, nowMs);
-  } catch {
+  const parsedServe = parseServeAtDetailed(input.serve_at, input.timezone, nowMs);
+  if (!parsedServe.ok) {
     return {
       feasible: false,
       reason: "Could not read serve time. Use HH:MM or an ISO timestamp.",
@@ -596,6 +620,23 @@ export function solveMeal(raw: SolverInput, nowMs = Date.now()): SolverResult {
       timezone: input.timezone,
     };
   }
+
+  if (parsedServe.past_today) {
+    const q = `Did you mean ${parsedServe.hhmm} tomorrow?`;
+    return {
+      feasible: false,
+      reason: `Serve time ${parsedServe.hhmm} has already passed today.`,
+      question: q,
+      steps: [],
+      warnings: [],
+      summary: q,
+      card: [q, DONENESS],
+      serve_at_local: parsedServe.hhmm,
+      timezone: input.timezone,
+    };
+  }
+
+  const serveMs = parsedServe.ms;
 
   const resolved = input.dishes.map(resolveDish);
   // Stable order: longer total first, then id (already sorted ids in input, re-sort by duration).
@@ -695,6 +736,27 @@ export function solveMeal(raw: SolverInput, nowMs = Date.now()): SolverResult {
       steps,
       warnings,
       summary: question,
+      card: buildCard(steps, false, warnings),
+      serve_at_local: formatLocalTime(serveMs, input.timezone),
+      timezone: input.timezone,
+    };
+  }
+
+  // Never plan in the past: if the first step starts before now, ask to push serve time.
+  const earliestStart = Math.min(...placements.map((p) => p.start_ms));
+  if (earliestStart < nowMs - 500) {
+    const shiftMs = nowMs - earliestStart;
+    const earliestServeMs = serveMs + shiftMs;
+    const earliestLocal = formatLocalTime(earliestServeMs, input.timezone);
+    const q = `The earliest this menu can be ready is ${earliestLocal}. Serve then?`;
+    const steps = buildSteps(placements, serveMs, input);
+    return {
+      feasible: false,
+      reason: "The plan would start before now.",
+      question: q,
+      steps,
+      warnings,
+      summary: q,
       card: buildCard(steps, false, warnings),
       serve_at_local: formatLocalTime(serveMs, input.timezone),
       timezone: input.timezone,

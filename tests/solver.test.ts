@@ -311,3 +311,41 @@ describe("solver property tests (500 random dish sets)", () => {
     assert.ok(feasibleCount > 50, `expected many feasible plans, got ${feasibleCount}`);
   });
 });
+
+describe("relative to now", () => {
+  it("asks about tomorrow when HH:MM serve_at has already passed today", () => {
+    // now is 15:00; ask for 14:00 same day
+    const input = baseInput({
+      dishes: [{ id: "salad" }],
+      serve_at: "14:00",
+    });
+    const plan = solveMeal(input, NOW);
+    assert.equal(plan.feasible, false);
+    assert.match(plan.question ?? "", /Did you mean 14:00 tomorrow\?/);
+  });
+
+  it("refuses a plan whose first step would start before now", () => {
+    // now is 17:30; an 18:00 lasagna dinner needs to start well before that
+    const lateNow = Date.parse("2026-11-26T17:30:00-05:00");
+    const input = baseInput({
+      dishes: [{ id: "lasagna" }, { id: "salad" }],
+      serve_at: "18:00",
+    });
+    const plan = solveMeal(input, lateNow);
+    assert.equal(plan.feasible, false);
+    assert.match(plan.question ?? "", /The earliest this menu can be ready is \d{2}:\d{2}\. Serve then\?/);
+  });
+
+  it("never emits a step before now when the plan is feasible", () => {
+    const input = baseInput({
+      dishes: [{ id: "green_beans" }, { id: "rice" }],
+      serve_at: "18:00",
+    });
+    const plan = solveMeal(input, NOW);
+    assert.equal(plan.feasible, true, plan.reason ?? plan.summary);
+    const nowLocal = formatLocalTime(NOW, TZ);
+    for (const step of plan.steps) {
+      assert.ok(step.at >= nowLocal, `step ${step.at} ${step.action} is before now ${nowLocal}`);
+    }
+  });
+});

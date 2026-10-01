@@ -134,6 +134,7 @@ describe("MCP tools", () => {
         timezone: "America/New_York",
         ovens: 1,
         cooks: 1,
+        now: "2026-11-26T15:00:00-05:00",
       }),
     );
     const plan = parseResult(planned.body);
@@ -146,7 +147,12 @@ describe("MCP tools", () => {
     assert.ok(Array.isArray(read.card));
 
     const next = parseResult(
-      (await send(port, toolCall(6, "whats_next", { plan_id: plan.plan_id, now: "17:00" }))).body,
+      (
+        await send(
+          port,
+          toolCall(6, "whats_next", { plan_id: plan.plan_id, now: "2026-11-26T17:00:00-05:00" }),
+        )
+      ).body,
     );
     assert.ok(next.summary);
 
@@ -160,7 +166,12 @@ describe("MCP tools", () => {
       (
         await send(
           port,
-          toolCall(8, "running_late", { plan_id: plan.plan_id, dish: "roast_potatoes", minutes: 10 }),
+          toolCall(8, "running_late", {
+            plan_id: plan.plan_id,
+            dish: "roast_potatoes",
+            minutes: 10,
+            now: "2026-11-26T15:00:00-05:00",
+          }),
         )
       ).body,
     );
@@ -171,7 +182,12 @@ describe("MCP tools", () => {
       (
         await send(
           port,
-          toolCall(9, "change_menu", { plan_id: plan.plan_id, add: ["salad"], remove: ["green_beans"] }),
+          toolCall(9, "change_menu", {
+            plan_id: plan.plan_id,
+            add: ["salad"],
+            remove: ["green_beans"],
+            now: "2026-11-26T15:00:00-05:00",
+          }),
         )
       ).body,
     );

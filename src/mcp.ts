@@ -178,6 +178,7 @@ function planPayload(plan: { plan_id: string; plan_token: string; result: import
   };
   if (r.reason) payload.reason = r.reason;
   if (r.question) payload.question = r.question;
+  if (r.conflicts) payload.conflicts = r.conflicts;
   return payload;
 }
 
@@ -295,6 +296,9 @@ export function createDinnerConductorServer(): McpServer {
         warnings: z.array(z.string()).optional(),
         question: z.string().optional(),
         reason: z.string().optional(),
+        conflicts: z
+          .array(z.object({ type: z.string(), dishes: z.array(z.string()) }))
+          .optional(),
         serve_at_local: z.string().optional(),
         timezone: z.string().optional(),
         changed: z.string().optional(),

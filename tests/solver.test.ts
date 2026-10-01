@@ -279,6 +279,29 @@ describe("solver determinism and properties", () => {
     }
   });
 
+  it("returns conflicts[] and Draft label when the plan does not fit", () => {
+    const input = baseInput({
+      dishes: [
+        { id: "turkey_breast", overrides: { hold_min: 0 } },
+        { id: "roast_potatoes", overrides: { hold_min: 0, cook_min: 90 } },
+        { id: "dinner_rolls", overrides: { hold_min: 0 } },
+      ],
+      ovens: 1,
+      cooks: 1,
+    });
+    const plan = solveMeal(input, NOW);
+    assert.equal(plan.feasible, false);
+    assert.ok(plan.conflicts && plan.conflicts.length >= 1, "expected conflicts[]");
+    for (const c of plan.conflicts!) {
+      assert.ok(c.type, "conflict type");
+      assert.ok(Array.isArray(c.dishes) && c.dishes.length >= 1, "conflict dishes");
+    }
+    assert.ok(plan.question?.endsWith("?"));
+    assert.equal((plan.question!.match(/\?/g) ?? []).length, 1);
+    assert.match(plan.summary, /Draft - not workable yet/);
+    assert.ok(plan.card.some((line) => line.includes("Draft - not workable yet")));
+  });
+
   it("formats local serve times in the given timezone", () => {
     const ms = parseServeAt("18:30", "America/Chicago", NOW);
     assert.equal(formatLocalTime(ms, "America/Chicago"), "18:30");

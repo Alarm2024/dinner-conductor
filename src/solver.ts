@@ -39,10 +39,19 @@ export interface PlanStep {
   temp: string | null;
 }
 
+export type ConflictType = "hands_on" | "oven_temp" | "oven_racks" | "burners" | "hold" | "past_start" | "past_serve" | "serve_at";
+
+export interface PlanConflict {
+  type: ConflictType;
+  dishes: string[];
+}
+
 export interface SolverResult {
   feasible: boolean;
   reason?: string;
   question?: string;
+  /** Present when the plan does not fit; every detected conflict. */
+  conflicts?: PlanConflict[];
   steps: PlanStep[];
   warnings: string[];
   summary: string;
@@ -50,6 +59,8 @@ export interface SolverResult {
   serve_at_local: string;
   timezone: string;
 }
+
+const DRAFT_LABEL = "Draft - not workable yet";
 
 interface ResolvedDish {
   id: string;
@@ -318,9 +329,17 @@ function computePreheatSegments(placements: Placement[], ovens: number, units: T
 }
 
 interface Conflict {
-  type: "hands_on" | "oven_temp" | "oven_racks" | "burners" | "hold";
+  type: Exclude<ConflictType, "past_start" | "past_serve" | "serve_at">;
   dish_ids: string[];
   detail: string;
+}
+
+function toPlanConflicts(conflicts: Conflict[]): PlanConflict[] {
+  return conflicts.map((c) => ({ type: c.type, dishes: [...c.dish_ids].sort() }));
+}
+
+function draftSummary(question: string): string {
+  return `${DRAFT_LABEL}. ${question}`;
 }
 
 function findConflicts(placements: Placement[], serveMs: number, input: SolverInput): Conflict[] {
@@ -663,7 +682,7 @@ function buildCard(steps: PlanStep[], feasible: boolean, warnings: string[]): st
     const temp = s.temp ? ` (${s.temp})` : "";
     return `${s.at} — ${s.action}${temp}`;
   });
-  if (!feasible) lines.unshift("Plan does not fit as requested.");
+  if (!feasible) lines.unshift(DRAFT_LABEL);
   for (const w of warnings) lines.push(`Note: ${w}`);
   lines.push(DONENESS);
   return lines;
@@ -671,10 +690,10 @@ function buildCard(steps: PlanStep[], feasible: boolean, warnings: string[]): st
 
 function spokenSummary(placements: Placement[], serveMs: number, input: SolverInput, feasible: boolean, question?: string): string {
   if (!feasible && question) {
-    return question;
+    return draftSummary(question);
   }
   if (!feasible) {
-    return "This meal plan does not fit with the ovens and cooks available.";
+    return draftSummary("This meal plan does not fit with the ovens and cooks available.");
   }
   const names = placements.map((p) => p.dish.name);
   const list =
@@ -1011,14 +1030,16 @@ export function solveMeal(raw: SolverInput, nowMs = Date.now()): SolverResult {
 
   const parsedServe = parseServeAtDetailed(input.serve_at, input.timezone, nowMs);
   if (!parsedServe.ok) {
+    const q = "What time should dinner be served?";
     return {
       feasible: false,
       reason: "Could not read serve time. Use HH:MM or an ISO timestamp.",
-      question: "What time should dinner be served?",
+      question: q,
+      conflicts: [{ type: "serve_at", dishes: [] }],
       steps: [],
       warnings: [],
-      summary: "What time should dinner be served?",
-      card: ["Could not read serve time.", DONENESS],
+      summary: draftSummary(q),
+      card: [DRAFT_LABEL, "Could not read serve time.", DONENESS],
       serve_at_local: input.serve_at,
       timezone: input.timezone,
     };
@@ -1030,10 +1051,11 @@ export function solveMeal(raw: SolverInput, nowMs = Date.now()): SolverResult {
       feasible: false,
       reason: `Serve time ${parsedServe.hhmm} has already passed today.`,
       question: q,
+      conflicts: [{ type: "past_serve", dishes: input.dishes.map((d) => d.id).sort() }],
       steps: [],
       warnings: [],
-      summary: q,
-      card: [q, DONENESS],
+      summary: draftSummary(q),
+      card: [DRAFT_LABEL, q, DONENESS],
       serve_at_local: parsedServe.hhmm,
       timezone: input.timezone,
     };
@@ -1058,16 +1080,19 @@ export function solveMeal(raw: SolverInput, nowMs = Date.now()): SolverResult {
   let placements = searched.placements;
 
   if (searched.conflicts.length > 0) {
-    const conflict = searched.conflicts[0]!;
+    const allConflicts = findConflicts(placements, serveMs, input);
+    const conflicts = allConflicts.length > 0 ? allConflicts : searched.conflicts;
+    const conflict = conflicts[0]!;
     const question = conflictQuestion(conflict, placements);
     const steps = buildSteps(placements, serveMs, input);
     return {
       feasible: false,
       reason: conflict.detail,
       question,
+      conflicts: toPlanConflicts(conflicts),
       steps,
       warnings,
-      summary: question,
+      summary: draftSummary(question),
       card: buildCard(steps, false, warnings),
       serve_at_local: formatLocalTime(serveMs, input.timezone),
       timezone: input.timezone,
@@ -1086,9 +1111,10 @@ export function solveMeal(raw: SolverInput, nowMs = Date.now()): SolverResult {
       feasible: false,
       reason: "The plan would start before now.",
       question: q,
+      conflicts: [{ type: "past_start", dishes: placements.map((p) => p.dish.id).sort() }],
       steps,
       warnings,
-      summary: q,
+      summary: draftSummary(q),
       card: buildCard(steps, false, warnings),
       serve_at_local: formatLocalTime(serveMs, input.timezone),
       timezone: input.timezone,
@@ -1158,8 +1184,8 @@ export function applyRunningLate(
       feasible: false,
       reason: `${name} is ${minutes} minutes late.`,
       question: q,
-      summary: q,
-      card: [`${name} is ${minutes} minutes late.`, q, ...plan.card.filter((l) => !l.startsWith("Note:"))],
+      summary: draftSummary(q),
+      card: [DRAFT_LABEL, `${name} is ${minutes} minutes late.`, q, ...plan.card.filter((l) => !l.startsWith("Note:") && l !== DRAFT_LABEL)],
       serve_at_local: proposedLocal,
     };
   }
@@ -1190,8 +1216,8 @@ export function applyRunningLate(
       feasible: false,
       reason: `${name} is ${minutes} minutes late.`,
       question: q,
-      summary: q,
-      card: [`${name} is ${minutes} minutes late.`, q, ...alt.card],
+      summary: draftSummary(q),
+      card: [DRAFT_LABEL, `${name} is ${minutes} minutes late.`, q, ...alt.card.filter((l) => l !== DRAFT_LABEL)],
       serve_at_local: proposedLocal,
     };
   }
@@ -1203,9 +1229,10 @@ export function applyRunningLate(
     feasible: false,
     reason: `${name} is ${minutes} minutes late.`,
     question: q,
+    conflicts: plan.conflicts ?? alt.conflicts ?? [{ type: "hold", dishes: [dishId] }],
     steps,
     warnings,
-    summary: q,
+    summary: draftSummary(q),
     card: buildCard(steps, false, warnings),
     serve_at_local: formatLocalTime(originalServeMs, raw.timezone),
     timezone: raw.timezone,
@@ -1218,6 +1245,7 @@ export function stablePlanFingerprint(result: SolverResult): string {
     feasible: result.feasible,
     reason: result.reason ?? null,
     question: result.question ?? null,
+    conflicts: result.conflicts ?? null,
     steps: result.steps,
     warnings: result.warnings,
     summary: result.summary,

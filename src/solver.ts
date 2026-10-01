@@ -256,6 +256,67 @@ function handsOnIntervals(p: Placement): Interval[] {
     }));
 }
 
+interface PreheatSeg {
+  oven_index: number;
+  start: number;
+  end: number;
+  temp_f: number;
+  action: string;
+  /** Dish whose bake this preheat/cool prepares for. */
+  dish_id: string;
+}
+
+/** 15 min before first bake; 10 min before each temp increase; 10 min door-open before each decrease. */
+function computePreheatSegments(placements: Placement[], ovens: number, units: TempUnits): PreheatSeg[] {
+  const out: PreheatSeg[] = [];
+  for (let oi = 0; oi < ovens; oi++) {
+    const bakes = placements
+      .filter((p) => p.oven_index === oi && p.dish.appliance === "oven" && p.dish.cook_min > 0)
+      .map((p) => {
+        const c = cookInterval(p);
+        return { start: c.start, end: c.end, temp_f: p.dish.oven_temp?.f ?? 0, dish_id: p.dish.id, dish: p.dish };
+      })
+      .sort((a, b) => a.start - b.start || a.dish_id.localeCompare(b.dish_id));
+    if (bakes.length === 0) continue;
+    const first = bakes[0]!;
+    const firstLabel = tempLabel(first.dish.oven_temp, units) ?? `${first.temp_f} F`;
+    out.push({
+      oven_index: oi,
+      start: first.start - 15 * 60_000,
+      end: first.start,
+      temp_f: first.temp_f,
+      action: `Preheat to ${firstLabel}`,
+      dish_id: first.dish_id,
+    });
+    for (let i = 1; i < bakes.length; i++) {
+      const prev = bakes[i - 1]!;
+      const cur = bakes[i]!;
+      if (cur.temp_f === prev.temp_f) continue;
+      const label = tempLabel(cur.dish.oven_temp, units) ?? `${cur.temp_f} F`;
+      if (cur.temp_f > prev.temp_f) {
+        out.push({
+          oven_index: oi,
+          start: cur.start - 10 * 60_000,
+          end: cur.start,
+          temp_f: cur.temp_f,
+          action: `Preheat to ${label}`,
+          dish_id: cur.dish_id,
+        });
+      } else {
+        out.push({
+          oven_index: oi,
+          start: cur.start - 10 * 60_000,
+          end: cur.start,
+          temp_f: cur.temp_f,
+          action: `Open door to cool to ${label}`,
+          dish_id: cur.dish_id,
+        });
+      }
+    }
+  }
+  return out;
+}
+
 interface Conflict {
   type: "hands_on" | "oven_temp" | "oven_racks" | "burners" | "hold";
   dish_ids: string[];
@@ -339,7 +400,9 @@ function findConflicts(placements: Placement[], serveMs: number, input: SolverIn
     }
   }
 
-  // Ovens: per oven index, temp must be unique at a time; units <= 2
+  // Ovens: per oven index, temp must be unique at a time; units <= 2.
+  // Preheat / cool-down occupies the oven at its target temperature.
+  const preheats = computePreheatSegments(placements, input.ovens, input.units);
   for (let oi = 0; oi < input.ovens; oi++) {
     const onOven = placements.filter((p) => p.oven_index === oi && p.dish.appliance === "oven" && p.dish.cook_min > 0);
     const oEvents: Array<{ t: number; deltaUnits: number; temp: number; id: string; open: boolean }> = [];
@@ -348,6 +411,12 @@ function findConflicts(placements: Placement[], serveMs: number, input: SolverIn
       const temp = p.dish.oven_temp?.f ?? 0;
       oEvents.push({ t: c.start, deltaUnits: p.dish.oven_units, temp, id: p.dish.id, open: true });
       oEvents.push({ t: c.end, deltaUnits: -p.dish.oven_units, temp, id: p.dish.id, open: false });
+    }
+    for (const ph of preheats.filter((p) => p.oven_index === oi)) {
+      // Full-oven occupancy during preheat / cool (2 rack units).
+      const id = `preheat:${ph.dish_id}`;
+      oEvents.push({ t: ph.start, deltaUnits: 2, temp: ph.temp_f, id, open: true });
+      oEvents.push({ t: ph.end, deltaUnits: -2, temp: ph.temp_f, id, open: false });
     }
     oEvents.sort((a, b) => a.t - b.t || Number(a.open) - Number(b.open) || a.id.localeCompare(b.id));
     let units = 0;
@@ -360,9 +429,13 @@ function findConflicts(placements: Placement[], serveMs: number, input: SolverIn
         temps.delete(ev.id);
         units += ev.deltaUnits;
       }
+      const realIds = [...temps.keys()].filter((id) => !id.startsWith("preheat:")).sort();
       const distinct = new Set(temps.values());
       if (distinct.size > 1) {
-        const ids = [...temps.keys()].sort();
+        const ids =
+          realIds.length >= 2
+            ? realIds
+            : [...new Set([...realIds, ...[...temps.keys()].filter((id) => id.startsWith("preheat:")).map((id) => id.slice("preheat:".length))])].sort();
         const names = ids.map((id) => placements.find((p) => p.dish.id === id)?.dish.name ?? id);
         out.push({
           type: "oven_temp",
@@ -372,9 +445,13 @@ function findConflicts(placements: Placement[], serveMs: number, input: SolverIn
         break;
       }
       if (units > 2) {
+        const ids =
+          realIds.length > 0
+            ? realIds
+            : [...temps.keys()].map((id) => (id.startsWith("preheat:") ? id.slice("preheat:".length) : id)).sort();
         out.push({
           type: "oven_racks",
-          dish_ids: [...temps.keys()].sort(),
+          dish_ids: [...new Set(ids)].sort(),
           detail: `Oven ${oi + 1} needs more than 2 rack units at the same time.`,
         });
         break;
@@ -476,6 +553,22 @@ function conflictQuestion(conflict: Conflict, placements: Placement[]): string {
 function buildSteps(placements: Placement[], serveMs: number, input: SolverInput): PlanStep[] {
   const steps: PlanStep[] = [];
   const sorted = [...placements].sort((a, b) => a.start_ms - b.start_ms || a.dish.id.localeCompare(b.dish.id));
+
+  for (const ph of computePreheatSegments(placements, input.ovens, input.units)) {
+    const ovenLabel = input.ovens > 1 ? `oven ${ph.oven_index + 1}` : "oven";
+    steps.push({
+      at: formatLocalTime(ph.start, input.timezone),
+      dish: ovenLabel,
+      dish_id: `oven_${ph.oven_index + 1}`,
+      action: ph.action,
+      hands_on: false,
+      appliance: "oven",
+      temp: tempLabel(
+        placements.find((p) => p.dish.id === ph.dish_id)?.dish.oven_temp ?? { f: ph.temp_f, c: Math.round(((ph.temp_f - 32) * 5) / 9) },
+        input.units,
+      ),
+    });
+  }
 
   for (const p of sorted) {
     if (p.dish.prep_min > 0 || p.dish.hands_on.some((h) => h.offset_min === 0 && h.minutes > 0)) {
@@ -745,8 +838,9 @@ export function solveMeal(raw: SolverInput, nowMs = Date.now()): SolverResult {
     };
   }
 
-  // Never plan in the past: if the first step starts before now, ask to push serve time.
-  const earliestStart = Math.min(...placements.map((p) => p.start_ms));
+  // Never plan in the past: if the first step (including preheat) starts before now, ask to push serve time.
+  const preheatStarts = computePreheatSegments(placements, input.ovens, input.units).map((p) => p.start);
+  const earliestStart = Math.min(...placements.map((p) => p.start_ms), ...preheatStarts);
   if (earliestStart < nowMs - 500) {
     const shiftMs = nowMs - earliestStart;
     const earliestServeMs = serveMs + shiftMs;

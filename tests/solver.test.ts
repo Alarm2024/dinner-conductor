@@ -363,6 +363,77 @@ describe("solver property tests (500 random dish sets)", () => {
   });
 });
 
+describe("oven preheat", () => {
+  it("adds a 15-minute Preheat before the first bake on each oven", () => {
+    const input = baseInput({
+      dishes: [{ id: "chicken_thighs" }, { id: "roast_potatoes" }, { id: "green_beans" }],
+      cooks: 1,
+      ovens: 1,
+    });
+    const plan = solveMeal(input, NOW);
+    assert.equal(plan.feasible, true, plan.reason ?? plan.summary);
+    const preheat = plan.steps.find((s) => s.action.startsWith("Preheat to"));
+    assert.ok(preheat, "expected a Preheat step");
+    assert.match(preheat!.action, /425 F/);
+    assert.equal(preheat!.appliance, "oven");
+    assert.equal(preheat!.hands_on, false);
+    const firstBake = plan.steps
+      .filter((s) => s.temp && s.action.startsWith("Bake"))
+      .sort((a, b) => a.at.localeCompare(b.at) || a.dish_id.localeCompare(b.dish_id))[0];
+    assert.ok(firstBake);
+    const serveMs = parseServeAt(input.serve_at, input.timezone, NOW);
+    const preheatMs = localToMs(preheat!.at, serveMs, input.timezone);
+    const bakeMs = localToMs(firstBake!.at, serveMs, input.timezone);
+    assert.equal(bakeMs - preheatMs, 15 * 60_000);
+  });
+
+  it("uses 10 minutes before a temperature increase and door-open cool on a decrease", () => {
+    // Force cool-then-hot then hot-then-cool by pinning cook windows with hold.
+    const upInput = baseInput({
+      dishes: [
+        { id: "turkey_breast", overrides: { hold_min: 90 } },
+        { id: "roast_potatoes", overrides: { hold_min: 0 } },
+      ],
+      ovens: 1,
+      cooks: 1,
+      serve_at: "20:00",
+    });
+    const up = solveMeal(upInput, NOW);
+    assert.equal(up.feasible, true, up.reason ?? up.summary);
+    const serveUp = parseServeAt(upInput.serve_at, upInput.timezone, NOW);
+    const potatoBake = up.steps.find((s) => s.dish_id === "roast_potatoes" && s.action.startsWith("Bake"))!;
+    const turkeyBake = up.steps.find((s) => s.dish_id === "turkey_breast" && s.action.startsWith("Bake"))!;
+    const potatoStart = localToMs(potatoBake.at, serveUp, upInput.timezone);
+    const turkeyStart = localToMs(turkeyBake.at, serveUp, upInput.timezone);
+    assert.ok(turkeyStart < potatoStart, "cooler turkey should bake before hotter potatoes");
+    const bump = up.steps.find((s) => s.action === "Preheat to 425 F");
+    assert.ok(bump, "expected Preheat to 425 F before temperature increase");
+    // Not the initial 15-min preheat: this one ends at the potato bake start and is 10 min.
+    assert.equal(potatoStart - localToMs(bump!.at, serveUp, upInput.timezone), 10 * 60_000);
+
+    const downInput = baseInput({
+      dishes: [
+        { id: "dinner_rolls", overrides: { hold_min: 90 } },
+        { id: "stuffing", overrides: { hold_min: 0 } },
+      ],
+      ovens: 1,
+      cooks: 1,
+      serve_at: "20:00",
+    });
+    const down = solveMeal(downInput, NOW);
+    assert.equal(down.feasible, true, down.reason ?? down.summary);
+    const serveDown = parseServeAt(downInput.serve_at, downInput.timezone, NOW);
+    const rollsBake = down.steps.find((s) => s.dish_id === "dinner_rolls" && s.action.startsWith("Bake"))!;
+    const stuffBake = down.steps.find((s) => s.dish_id === "stuffing" && s.action.startsWith("Bake"))!;
+    const rollsStart = localToMs(rollsBake.at, serveDown, downInput.timezone);
+    const stuffStart = localToMs(stuffBake.at, serveDown, downInput.timezone);
+    assert.ok(rollsStart < stuffStart, "hotter rolls should bake before cooler stuffing");
+    const cool = down.steps.find((s) => /^Open door to cool to 350 F$/.test(s.action));
+    assert.ok(cool, "expected Open door to cool before temperature decrease");
+    assert.equal(stuffStart - localToMs(cool!.at, serveDown, downInput.timezone), 10 * 60_000);
+  });
+});
+
 describe("relative to now", () => {
   it("asks about tomorrow when HH:MM serve_at has already passed today", () => {
     // now is 15:00; ask for 14:00 same day

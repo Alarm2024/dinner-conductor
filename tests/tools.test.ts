@@ -141,6 +141,126 @@ describe("MCP tools", () => {
     assert.match(String(payload.summary), /How long does your recipe say to roast it\?/);
   });
 
+  it("plan_meal uses the request's now, not the server clock (sim at 16:00, dinner at 19:00 today)", async () => {
+    const reply = await send(
+      port,
+      toolCall(90, "plan_meal", {
+        dishes: ["roast_chicken", "roast_potatoes", "green_beans"],
+        serve_at: "19:00",
+        timezone: "America/New_York",
+        ovens: 1,
+        cooks: 1,
+        burners: 4,
+        units: "F",
+        now: "2026-11-26T16:00:00-05:00",
+      }),
+    );
+    const payload = parseResult(reply.body);
+    assert.equal(payload.feasible, true, String(payload.summary));
+    assert.doesNotMatch(String(payload.summary), /tomorrow/i);
+  });
+
+  it("whats_next refuses an unreadable now instead of using the server clock", async () => {
+    const planned = parseResult(
+      (
+        await send(
+          port,
+          toolCall(91, "plan_meal", {
+            dishes: ["pasta"],
+            serve_at: "19:00",
+            timezone: "America/New_York",
+            ovens: 1,
+            now: "2026-11-26T16:00:00-05:00",
+          }),
+        )
+      ).body,
+    );
+    const reply = await send(port, toolCall(92, "whats_next", { plan_id: planned.plan_id, now: "16:00" }));
+    assert.match(reply.body, /"isError":true/);
+  });
+
+  it("plan_meal uses the request's now", async () => {
+    const late = parseResult(
+      (
+        await send(
+          port,
+          toolCall(40, "plan_meal", {
+            dishes: ["lasagna"],
+            serve_at: "18:00",
+            timezone: "America/New_York",
+            ovens: 1,
+            now: "2026-11-26T17:30:00-05:00",
+          }),
+        )
+      ).body,
+    );
+    assert.equal(late.feasible, false);
+    assert.match(String(late.question ?? late.summary), /The earliest this menu can be ready is \d{2}:\d{2}/);
+
+    const early = parseResult(
+      (
+        await send(
+          port,
+          toolCall(41, "plan_meal", {
+            dishes: ["lasagna"],
+            serve_at: "18:00",
+            timezone: "America/New_York",
+            ovens: 1,
+            now: "2026-11-26T10:00:00-05:00",
+          }),
+        )
+      ).body,
+    );
+    assert.equal(early.feasible, true, String(early.reason ?? early.summary));
+  });
+
+  it("whats_next refuses an unreadable now", async () => {
+    const planned = parseResult(
+      (
+        await send(
+          port,
+          toolCall(42, "plan_meal", {
+            dishes: ["salad"],
+            serve_at: "18:00",
+            timezone: "America/New_York",
+            ovens: 1,
+            now: "2026-11-26T15:00:00-05:00",
+          }),
+        )
+      ).body,
+    );
+    assert.ok(planned.plan_id);
+    const refused = parseResult(
+      (
+        await send(
+          port,
+          toolCall(43, "whats_next", { plan_id: planned.plan_id, now: "not-a-timestamp" }),
+        )
+      ).body,
+    );
+    assert.match(String(refused.summary), /now must be an ISO timestamp/);
+  });
+
+  it("running_late and change_menu accept now", async () => {
+    const reply = await send(port, rpc(44, "tools/list"));
+    const msg = JSON.parse(
+      reply.body.includes("data:")
+        ? reply.body
+            .split("\n")
+            .map((l) => l.trim())
+            .find((l) => l.startsWith("data:"))!
+            .slice("data:".length)
+            .trim()
+        : reply.body,
+    ) as { result?: { tools?: Array<{ name: string; inputSchema?: { properties?: Record<string, unknown> } }> } };
+    const tools = msg.result?.tools ?? [];
+    for (const name of ["running_late", "change_menu", "plan_meal", "whats_next"]) {
+      const tool = tools.find((t) => t.name === name);
+      assert.ok(tool, name);
+      assert.ok(tool!.inputSchema?.properties && "now" in tool!.inputSchema.properties, `${name} schema accepts now`);
+    }
+  });
+
   it("plan_meal stores a plan and read_plan / whats_next / resume_plan work", async () => {
     const planned = await send(
       port,

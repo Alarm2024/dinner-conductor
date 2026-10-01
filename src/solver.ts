@@ -28,6 +28,8 @@ export interface SolverInput {
   ovens: number;
   burners: number;
   cooks: number;
+  /** Racks available in each oven. Active racks at any moment stay within this. */
+  rack_count?: number;
   units: TempUnits;
 }
 
@@ -76,6 +78,7 @@ interface ResolvedDish {
   oven_temp: OvenTemp | null;
   oven_units: number;
   burners: number;
+  proof_min: number;
   total_min: number;
 }
 
@@ -86,6 +89,8 @@ interface Placement {
   /** Absolute ms when dish is ready (end of rest). */
   ready_ms: number;
   oven_index: number | null;
+  /** Minutes the hands-on prep starts before the tight (just-in-time) start. Bounded by hold_min. */
+  prep_lead_min: number;
 }
 
 const DONENESS = "Check doneness with your recipe and a thermometer.";
@@ -215,7 +220,8 @@ function resolveDish(input: PlanDishInput): ResolvedDish {
   }
   const hands_on = base.hands_on.map((h) => ({ ...h }));
   const lastHands = Math.max(0, ...hands_on.map((h) => h.offset_min + h.minutes));
-  const total_min = Math.max(prep_min + cook_min + rest_min, lastHands);
+  const proof_min = base.proof_min ?? 0;
+  const total_min = Math.max(prep_min + proof_min + cook_min + rest_min, lastHands);
   return {
     id: base.id,
     name: base.names[0] ?? base.id,
@@ -228,8 +234,13 @@ function resolveDish(input: PlanDishInput): ResolvedDish {
     oven_temp,
     oven_units: o.oven_units ?? base.oven_units,
     burners: o.burners ?? base.burners,
+    proof_min,
     total_min,
   };
+}
+
+function rackCount(input: SolverInput): number {
+  return Math.max(1, Math.floor(input.rack_count ?? 2));
 }
 
 function tempLabel(temp: OvenTemp | null, units: TempUnits): string | null {
@@ -252,24 +263,30 @@ interface Interval {
 }
 
 function cookInterval(p: Placement): { start: number; end: number } {
-  const start = p.start_ms + p.dish.prep_min * 60_000;
+  const start = p.start_ms + (p.dish.prep_min + p.dish.proof_min) * 60_000;
   const end = start + p.dish.cook_min * 60_000;
   return { start, end };
 }
 
 function prepInterval(p: Placement): { start: number; end: number } {
-  return { start: p.start_ms, end: p.start_ms + p.dish.prep_min * 60_000 };
+  const start = p.start_ms - p.prep_lead_min * 60_000;
+  return { start, end: start + p.dish.prep_min * 60_000 };
 }
 
 function handsOnIntervals(p: Placement): Interval[] {
   return p.dish.hands_on
     .filter((h) => h.minutes > 0)
-    .map((h) => ({
-      start: p.start_ms + h.offset_min * 60_000,
-      end: p.start_ms + (h.offset_min + h.minutes) * 60_000,
-      dish_id: p.dish.id,
-      kind: "hands_on",
-    }));
+    .map((h) => {
+      // Offset 0 is the prep block and may slide earlier within the hold window.
+      const origin = h.offset_min === 0 ? p.start_ms - p.prep_lead_min * 60_000 : p.start_ms;
+      const offset = h.offset_min === 0 ? 0 : h.offset_min;
+      return {
+        start: origin + offset * 60_000,
+        end: origin + (offset + h.minutes) * 60_000,
+        dish_id: p.dish.id,
+        kind: "hands_on",
+      };
+    });
 }
 
 interface PreheatSeg {
@@ -372,12 +389,26 @@ function findConflicts(placements: Placement[], serveMs: number, input: SolverIn
       const temp = p.dish.oven_temp?.f ?? 0;
       oEvents.push({ t: c.start, deltaUnits: p.dish.oven_units, temp, id: p.dish.id, open: true });
       oEvents.push({ t: c.end, deltaUnits: -p.dish.oven_units, temp, id: p.dish.id, open: false });
+      // A roast that fills the oven keeps those racks through its rest. Search has to
+      // keep going and place the next dish after that, instead of stopping on the first clash.
+      if (p.dish.rest_min > 0 && p.dish.oven_units >= rackCount(input)) {
+        const id = `${p.dish.id}:rest`;
+        oEvents.push({ t: c.end, deltaUnits: p.dish.oven_units, temp, id, open: true });
+        oEvents.push({
+          t: c.end + p.dish.rest_min * 60_000,
+          deltaUnits: -p.dish.oven_units,
+          temp,
+          id,
+          open: false,
+        });
+      }
     }
     for (const ph of preheats.filter((p) => p.oven_index === oi)) {
-      // Full-oven occupancy during preheat / cool (2 rack units).
+      // Preheat / cool takes the whole oven for its duration.
       const id = `preheat:${ph.dish_id}`;
-      oEvents.push({ t: ph.start, deltaUnits: 2, temp: ph.temp_f, id, open: true });
-      oEvents.push({ t: ph.end, deltaUnits: -2, temp: ph.temp_f, id, open: false });
+      const racks = rackCount(input);
+      oEvents.push({ t: ph.start, deltaUnits: racks, temp: ph.temp_f, id, open: true });
+      oEvents.push({ t: ph.end, deltaUnits: -racks, temp: ph.temp_f, id, open: false });
     }
     oEvents.sort((a, b) => a.t - b.t || Number(a.open) - Number(b.open) || a.id.localeCompare(b.id));
     let units = 0;
@@ -390,7 +421,13 @@ function findConflicts(placements: Placement[], serveMs: number, input: SolverIn
         temps.delete(ev.id);
         units += ev.deltaUnits;
       }
-      const realIds = [...temps.keys()].filter((id) => !id.startsWith("preheat:")).sort();
+      const realIds = [
+        ...new Set(
+          [...temps.keys()]
+            .filter((id) => !id.startsWith("preheat:"))
+            .map((id) => (id.endsWith(":rest") ? id.slice(0, -":rest".length) : id)),
+        ),
+      ].sort();
       const distinct = new Set(temps.values());
       if (distinct.size > 1) {
         const ids =
@@ -405,7 +442,7 @@ function findConflicts(placements: Placement[], serveMs: number, input: SolverIn
         });
         break;
       }
-      if (units > 2) {
+      if (units > rackCount(input)) {
         const ids =
           realIds.length > 0
             ? realIds
@@ -413,7 +450,7 @@ function findConflicts(placements: Placement[], serveMs: number, input: SolverIn
         out.push({
           type: "oven_racks",
           dish_ids: [...new Set(ids)].sort(),
-          detail: `Oven ${oi + 1} needs more than 2 rack units at the same time.`,
+          detail: `Oven ${oi + 1} needs more than ${rackCount(input)} rack units at the same time.`,
         });
         break;
       }
@@ -493,7 +530,7 @@ function findConflicts(placements: Placement[], serveMs: number, input: SolverIn
   });
 }
 
-function assignOvens(placements: Placement[], ovens: number): void {
+function assignOvens(placements: Placement[], ovens: number, racks = 2): void {
   // Clear and greedily assign oven indices for oven dishes.
   for (const p of placements) {
     if (p.dish.appliance !== "oven" || p.dish.cook_min <= 0) {
@@ -515,7 +552,7 @@ function assignOvens(placements: Placement[], ovens: number): void {
         units += q.dish.oven_units;
         if ((q.dish.oven_temp?.f ?? 0) !== temp) tempOk = false;
       }
-      if (tempOk && units <= 2) {
+      if (tempOk && units <= racks) {
         best = oi;
         break;
       }
@@ -532,7 +569,7 @@ function assignOvens(placements: Placement[], ovens: number): void {
           const qc = cookInterval(q);
           if (overlaps(c.start, c.end, qc.start, qc.end)) units += q.dish.oven_units;
         }
-        if (units <= 2) {
+        if (units <= racks) {
           best = oi;
           break;
         }
@@ -579,7 +616,7 @@ function buildSteps(placements: Placement[], serveMs: number, input: SolverInput
   const sorted = [...placements].sort((a, b) => a.start_ms - b.start_ms || a.dish.id.localeCompare(b.dish.id));
 
   for (const ph of computePreheatSegments(placements, input.ovens, input.units)) {
-    const ovenLabel = input.ovens > 1 ? `oven ${ph.oven_index + 1}` : "oven";
+    const ovenLabel = `oven ${ph.oven_index + 1}`;
     steps.push({
       at: formatLocalTime(ph.start, input.timezone),
       dish: ovenLabel,
@@ -598,12 +635,25 @@ function buildSteps(placements: Placement[], serveMs: number, input: SolverInput
     if (p.dish.prep_min > 0 || p.dish.hands_on.some((h) => h.offset_min === 0 && h.minutes > 0)) {
       const label = p.dish.hands_on.find((h) => h.offset_min === 0)?.label ?? "prep";
       steps.push({
-        at: formatLocalTime(p.start_ms, input.timezone),
+        at: formatLocalTime(prepInterval(p).start, input.timezone),
         dish: p.dish.name,
         dish_id: p.dish.id,
         action: `Start ${label}`,
         hands_on: true,
         appliance: p.dish.appliance === "none" ? "counter" : p.dish.appliance,
+        temp: null,
+      });
+    }
+
+    if (p.dish.proof_min > 0 && p.dish.cook_min > 0) {
+      const proofStart = cookInterval(p).start - p.dish.proof_min * 60_000;
+      steps.push({
+        at: formatLocalTime(proofStart, input.timezone),
+        dish: p.dish.name,
+        dish_id: p.dish.id,
+        action: `Proof ${p.dish.name}`,
+        hands_on: false,
+        appliance: "counter",
         temp: null,
       });
     }
@@ -654,11 +704,17 @@ function buildSteps(placements: Placement[], serveMs: number, input: SolverInput
       });
     }
 
+    const held = p.ready_ms < serveMs - 30_000;
+    const action = !held
+      ? `${p.dish.name} ready`
+      : p.dish.appliance === "none"
+        ? `Hold ${p.dish.name}`
+        : `Hold ${p.dish.name} warm`;
     steps.push({
       at: formatLocalTime(p.ready_ms, input.timezone),
       dish: p.dish.name,
       dish_id: p.dish.id,
-      action: p.ready_ms < serveMs - 30_000 ? `Hold ${p.dish.name} warm` : `${p.dish.name} ready`,
+      action,
       hands_on: false,
       appliance: "none",
       temp: null,
@@ -707,7 +763,7 @@ function spokenSummary(placements: Placement[], serveMs: number, input: SolverIn
       : names.length === 2
         ? `${names[0]} and ${names[1]}`
         : `${names.slice(0, -1).join(", ")}, and ${names[names.length - 1]}`;
-  const start = Math.min(...placements.map((p) => p.start_ms));
+  const start = earliestPlanStart(placements, input);
   return `For ${list} at ${formatLocalTime(serveMs, input.timezone)}, start at ${formatLocalTime(start, input.timezone)}. ${DONENESS}`;
 }
 
@@ -727,6 +783,7 @@ function clonePlacements(placements: Placement[]): Placement[] {
     start_ms: p.start_ms,
     ready_ms: p.ready_ms,
     oven_index: p.oven_index,
+    prep_lead_min: p.prep_lead_min,
   }));
 }
 
@@ -735,19 +792,21 @@ function resetPlacements(placements: Placement[], serveMs: number): void {
     p.ready_ms = serveMs;
     p.start_ms = serveMs - p.dish.total_min * 60_000;
     p.oven_index = null;
+    p.prep_lead_min = 0;
   }
 }
 
 function placementSortKey(placements: Placement[]): string {
   return placements
-    .map((p) => `${p.dish.id}:${p.start_ms}:${p.ready_ms}:${p.oven_index ?? -1}`)
+    .map((p) => `${p.dish.id}:${p.start_ms}:${p.ready_ms}:${p.oven_index ?? -1}:${p.prep_lead_min}`)
     .sort()
     .join("|");
 }
 
 function earliestPlanStart(placements: Placement[], input: SolverInput): number {
   const preheatStarts = computePreheatSegments(placements, input.ovens, input.units).map((p) => p.start);
-  return Math.min(...placements.map((p) => p.start_ms), ...preheatStarts);
+  const anchors = placements.map((p) => p.start_ms - p.prep_lead_min * 60_000);
+  return Math.min(...anchors, ...preheatStarts);
 }
 
 /** Enforce bake gaps for a temp-group order without resetting placements. */
@@ -791,14 +850,14 @@ function enforceTempGroupGaps(
       }
     }
     if (!moved) break;
-    assignOvens(placements, input.ovens);
+    assignOvens(placements, input.ovens, rackCount(input));
   }
   return true;
 }
 
 /**
  * Pack hold-capable dishes of each later temp group to start right after the prior
- * group's gap (so sides bake while a roast rests). Fill up to 2 rack units with the
+ * group's gap (so sides bake while a roast rests). Fill up to rack_count with the
  * longest cooks first; leave remaining same-temp dishes near serve.
  */
 function packGroupsAfterPrior(
@@ -831,7 +890,7 @@ function packGroupsAfterPrior(
       );
       let units = 0;
       for (const p of packable) {
-        if (units + p.dish.oven_units > 2) continue;
+        if (units + p.dish.oven_units > rackCount(input)) continue;
         const c = cookInterval(p);
         if (c.start > targetStart + 500) {
           const shiftMin = Math.floor((c.start - targetStart) / 60_000);
@@ -843,38 +902,86 @@ function packGroupsAfterPrior(
       }
     }
   }
-  assignOvens(placements, input.ovens);
+  assignOvens(placements, input.ovens, rackCount(input));
 }
 
 /** Reset to ready-at-serve, then push earlier temp groups so bakes follow `order`. */
 function applyTempGroupOrder(placements: Placement[], order: number[], serveMs: number, input: SolverInput): boolean {
   resetPlacements(placements, serveMs);
-  assignOvens(placements, input.ovens);
+  assignOvens(placements, input.ovens, rackCount(input));
   if (!enforceTempGroupGaps(placements, order, serveMs, input)) return false;
   packGroupsAfterPrior(placements, order, serveMs, input);
   return enforceTempGroupGaps(placements, order, serveMs, input);
 }
 
 /**
+ * Slide the prep block earlier without moving the cook. The slack is the dish's
+ * hold window, and prep may not start before now. Returns true when a prep moved.
+ */
+function advancePrepLead(placements: Placement[], nowMs: number): boolean {
+  const blockers = placements.flatMap(handsOnIntervals);
+  const movers = placements
+    .filter((p) => p.dish.hands_on.some((h) => h.offset_min === 0 && h.minutes > 0))
+    .map((p) => {
+      const hands = p.dish.hands_on.find((h) => h.offset_min === 0 && h.minutes > 0)!;
+      const start = p.start_ms - p.prep_lead_min * 60_000;
+      return { p, start, end: start + hands.minutes * 60_000 };
+    })
+    .sort(
+      (a, b) =>
+        b.p.dish.hold_min - b.p.prep_lead_min - (a.p.dish.hold_min - a.p.prep_lead_min) ||
+        a.p.dish.id.localeCompare(b.p.dish.id),
+    );
+
+  for (const mover of movers) {
+    const roomHold = mover.p.dish.hold_min - mover.p.prep_lead_min;
+    const roomNow = Math.floor((mover.start - nowMs) / 60_000);
+    const room = Math.min(roomHold, Math.max(0, roomNow));
+    if (room <= 0) continue;
+    let need = 0;
+    for (const block of blockers) {
+      if (block.dish_id === mover.p.dish.id) continue;
+      if (!overlaps(mover.start, mover.end, block.start, block.end)) continue;
+      const clear = Math.ceil((mover.end - block.start) / 60_000);
+      if (clear > need) need = clear;
+    }
+    if (need <= 0) continue;
+    const jump = Math.min(need, room);
+    if (jump <= 0) continue;
+    mover.p.prep_lead_min += jump;
+    return true;
+  }
+  return false;
+}
+
+/**
  * List-scheduling for hands-on (and other) conflicts: repeatedly shift the
  * hold-capable dish that clears the first conflict, deterministic tie-break by id.
+ * Hands-on prep slides earlier inside the hold window before a whole-dish shift.
  * When `order` is set, re-enforce temperature-group gaps after each shift.
+ * A failed gap does not stop the search.
  */
 function resolveByShifting(
   placements: Placement[],
   serveMs: number,
   input: SolverInput,
   order: number[] | null = null,
+  nowMs = 0,
 ): Conflict[] {
+  let activeOrder = order;
   const maxPasses = 500;
   for (let pass = 0; pass < maxPasses; pass++) {
-    if (order && !enforceTempGroupGaps(placements, order, serveMs, input)) {
-      return findConflicts(placements, serveMs, input);
+    if (activeOrder && !enforceTempGroupGaps(placements, activeOrder, serveMs, input)) {
+      // This order cannot keep its gaps. Keep searching without it.
+      activeOrder = null;
     }
     const conflicts = findConflicts(placements, serveMs, input);
     if (conflicts.length === 0) return [];
 
     const conflict = conflicts[0]!;
+    if (conflict.type === "hands_on" && advancePrepLead(placements, nowMs)) {
+      continue;
+    }
     // For oven conflicts, prefer shifting the earlier-finishing dish (usually the one that should move forward).
     const candidates = placements
       .filter((p) => conflict.dish_ids.includes(p.dish.id) && remainingHold(p, serveMs) > 0)
@@ -924,13 +1031,14 @@ function resolveByShifting(
       // Snapshot to reject hands-on shifts that cannot be repaired by group gaps.
       const before = clonePlacements(placements);
       shiftEarlier(mover, jump);
-      assignOvens(placements, input.ovens);
-      if (order && !enforceTempGroupGaps(placements, order, serveMs, input)) {
+      assignOvens(placements, input.ovens, rackCount(input));
+      if (activeOrder && !enforceTempGroupGaps(placements, activeOrder, serveMs, input)) {
         // Revert this mover and try another.
         for (let i = 0; i < placements.length; i++) {
           placements[i]!.start_ms = before[i]!.start_ms;
           placements[i]!.ready_ms = before[i]!.ready_ms;
           placements[i]!.oven_index = before[i]!.oven_index;
+          placements[i]!.prep_lead_min = before[i]!.prep_lead_min;
         }
         continue;
       }
@@ -950,6 +1058,7 @@ function searchSequencing(
   base: Placement[],
   serveMs: number,
   input: SolverInput,
+  nowMs: number,
 ): { placements: Placement[]; conflicts: Conflict[] } {
   const temps = [
     ...new Set(
@@ -987,12 +1096,18 @@ function searchSequencing(
 
   for (const order of orders) {
     const placements = clonePlacements(base);
-    if (!applyTempGroupOrder(placements, order, serveMs, input)) continue;
-    let conflicts = resolveByShifting(placements, serveMs, input, order);
+    const ordered = applyTempGroupOrder(placements, order, serveMs, input);
+    if (!ordered) {
+      // Gap enforcement failed for this order. Keep going with list scheduling.
+      resetPlacements(placements, serveMs);
+      assignOvens(placements, input.ovens, rackCount(input));
+    }
+    const activeOrder = ordered ? order : null;
+    let conflicts = resolveByShifting(placements, serveMs, input, activeOrder, nowMs);
     // Re-pack sides into rest windows after shifts, then resolve again.
-    if (conflicts.length === 0 || conflicts.every((c) => c.type !== "hold")) {
+    if (ordered && (conflicts.length === 0 || conflicts.every((c) => c.type !== "hold"))) {
       packGroupsAfterPrior(placements, order, serveMs, input);
-      conflicts = resolveByShifting(placements, serveMs, input, order);
+      conflicts = resolveByShifting(placements, serveMs, input, order, nowMs);
     }
     if (conflicts.length === 0) {
       const start = earliestPlanStart(placements, input);
@@ -1002,7 +1117,7 @@ function searchSequencing(
         bestStart = start;
         bestKey = key;
       }
-    } else if (!bestFail) {
+    } else if (!bestFail || conflicts.length < bestFail.conflicts.length) {
       bestFail = { placements: clonePlacements(placements), conflicts };
     }
   }
@@ -1012,17 +1127,33 @@ function searchSequencing(
   // Fallback: no group order, plain list scheduling from ready-at-serve.
   const fallback = clonePlacements(base);
   resetPlacements(fallback, serveMs);
-  assignOvens(fallback, input.ovens);
-  const conflicts = resolveByShifting(fallback, serveMs, input, null);
+  assignOvens(fallback, input.ovens, rackCount(input));
+  let conflicts = resolveByShifting(fallback, serveMs, input, null, nowMs);
   if (conflicts.length === 0) return { placements: fallback, conflicts: [] };
-  return bestFail ?? { placements: fallback, conflicts };
+
+  // Before giving up on hands-on overlap, slide prep earlier inside each hold window.
+  const last = bestFail?.placements ?? fallback;
+  for (let i = 0; i < 100 && conflicts.some((c) => c.type === "hands_on"); i++) {
+    if (!advancePrepLead(last, nowMs)) break;
+    assignOvens(last, input.ovens, rackCount(input));
+    conflicts = findConflicts(last, serveMs, input);
+  }
+  if (!conflicts.some((c) => c.type === "hands_on")) {
+    conflicts = resolveByShifting(last, serveMs, input, null, nowMs);
+  }
+  if (conflicts.length === 0) return { placements: last, conflicts: [] };
+  return { placements: last, conflicts };
 }
 
 /**
  * Pure deterministic meal timing solver. Same input always yields the same plan.
  * Never changes a dish's temperature or cook time; if the plan does not fit, returns a reason and one question.
  */
-export function solveMeal(raw: SolverInput, nowMs = Date.now()): SolverResult {
+export function solveMeal(
+  raw: SolverInput,
+  nowMs = Date.now(),
+  options?: { keepDraftSteps?: boolean },
+): SolverResult {
   const input: SolverInput = {
     dishes: [...raw.dishes].sort((a, b) => a.id.localeCompare(b.id)),
     serve_at: raw.serve_at,
@@ -1030,8 +1161,10 @@ export function solveMeal(raw: SolverInput, nowMs = Date.now()): SolverResult {
     ovens: Math.max(1, Math.min(2, raw.ovens)),
     burners: Math.max(1, raw.burners),
     cooks: Math.max(1, Math.min(2, raw.cooks)),
+    rack_count: rackCount(raw),
     units: raw.units === "C" ? "C" : "F",
   };
+  const keepDraftSteps = options?.keepDraftSteps === true;
 
   const parsedServe = parseServeAtDetailed(input.serve_at, input.timezone, nowMs);
   if (!parsedServe.ok) {
@@ -1094,13 +1227,13 @@ export function solveMeal(raw: SolverInput, nowMs = Date.now()): SolverResult {
   const basePlacements: Placement[] = resolved.map((dish) => {
     const ready_ms = serveMs;
     const start_ms = ready_ms - dish.total_min * 60_000;
-    return { dish, start_ms, ready_ms, oven_index: null };
+    return { dish, start_ms, ready_ms, oven_index: null, prep_lead_min: 0 };
   });
 
   const warnings: string[] = ["Your recipe's times win over these typical times."];
 
   // Deterministic search over temperature-group orders + list scheduling.
-  const searched = searchSequencing(basePlacements, serveMs, input);
+  const searched = searchSequencing(basePlacements, serveMs, input, nowMs);
   let placements = searched.placements;
 
   if (searched.conflicts.length > 0) {
@@ -1108,7 +1241,8 @@ export function solveMeal(raw: SolverInput, nowMs = Date.now()): SolverResult {
     const conflicts = allConflicts.length > 0 ? allConflicts : searched.conflicts;
     const conflict = conflicts[0]!;
     const question = conflictQuestion(conflict, placements);
-    const steps = buildSteps(placements, serveMs, input);
+    const timeline = buildSteps(placements, serveMs, input);
+    const steps = keepDraftSteps ? timeline : [];
     return {
       feasible: false,
       reason: conflict.detail,
@@ -1130,7 +1264,8 @@ export function solveMeal(raw: SolverInput, nowMs = Date.now()): SolverResult {
     const earliestServeMs = serveMs + shiftMs;
     const earliestLocal = formatLocalTime(earliestServeMs, input.timezone);
     const q = `The earliest this menu can be ready is ${earliestLocal}. Serve then?`;
-    const steps = buildSteps(placements, serveMs, input);
+    const timeline = buildSteps(placements, serveMs, input);
+    const steps = keepDraftSteps ? timeline : [];
     return {
       feasible: false,
       reason: "The plan would start before now.",
@@ -1160,11 +1295,71 @@ export function solveMeal(raw: SolverInput, nowMs = Date.now()): SolverResult {
   };
 }
 
+function hhmmToMinutes(hhmm: string): number {
+  const [h, m] = hhmm.split(":").map(Number);
+  return h * 60 + m;
+}
+
+/** How long a timeline step occupies, in minutes. Zero means a point on the clock. */
+function stepDurationMin(step: PlanStep, steps: PlanStep[]): number {
+  if (step.action.startsWith("Preheat") || step.action.startsWith("Open door")) {
+    const earlier = steps.some(
+      (s) =>
+        s.dish_id === step.dish_id &&
+        s.at < step.at &&
+        (s.action.startsWith("Preheat") || s.action.startsWith("Open door")),
+    );
+    return earlier ? 10 : 15;
+  }
+  const dish = getDishById(step.dish_id);
+  if (!dish) return 0;
+  if (step.action.startsWith("Proof")) return dish.proof_min ?? 0;
+  if (step.action.startsWith("Rest")) return dish.rest_min;
+  if (step.action.startsWith("Bake") || step.action.startsWith("Cook") || step.action.startsWith("Finish")) {
+    return dish.cook_min.typical;
+  }
+  if (step.hands_on) {
+    const label = step.action.replace(/^In progress: /, "").replace(/^Start /, "");
+    return dish.hands_on.find((h) => h.label === label)?.minutes ?? 0;
+  }
+  return 0;
+}
+
+/** Drop steps that are already done. A step still underway is shown at now, never before it. */
+function clipStepsAtNow(steps: PlanStep[], nowMs: number, timeZone: string): PlanStep[] {
+  const nowLocal = formatLocalTime(nowMs, timeZone);
+  const nowMin = hhmmToMinutes(nowLocal);
+  const sorted = [...steps].sort(
+    (a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : a.dish_id.localeCompare(b.dish_id) || a.action.localeCompare(b.action)),
+  );
+  const out: PlanStep[] = [];
+  for (let i = 0; i < sorted.length; i++) {
+    const step = sorted[i]!;
+    if (step.at >= nowLocal) {
+      out.push(step);
+      continue;
+    }
+    const duration = stepDurationMin(step, sorted);
+    const endMin = hhmmToMinutes(step.at) + duration;
+    const nextLater = sorted.slice(i + 1).find((s) => s.at > step.at);
+    const stillGoing = endMin > nowMin || (duration === 0 && (!nextLater || nextLater.at > nowLocal));
+    if (!stillGoing) continue;
+    out.push({
+      ...step,
+      at: nowLocal,
+      action: step.action.startsWith("In progress: ") ? step.action : `In progress: ${step.action}`,
+    });
+  }
+  out.sort(
+    (a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : a.dish_id.localeCompare(b.dish_id) || a.action.localeCompare(b.action)),
+  );
+  return out;
+}
+
 /**
- * Apply a running-late delay: move dish X's ready time N minutes later.
- * Steps before now stay done; nothing is scheduled before now.
- * Prefer proposing serve_at + N when not-yet-started dishes can still fit hold windows.
- * Never shortens a cook time.
+ * Apply a running-late delay: push serve_at forward by N minutes.
+ * Steps before now are done, or in progress at now. Nothing is shown before now.
+ * Never shortens a cook time. A plan that still does not fit has no timeline.
  */
 export function applyRunningLate(
   raw: SolverInput,
@@ -1175,90 +1370,47 @@ export function applyRunningLate(
   const warnings = ["Your recipe's times win over these typical times."];
   const parsedServe = parseServeAtDetailed(raw.serve_at, raw.timezone, nowMs);
   if (!parsedServe.ok || parsedServe.past_today) {
-    return solveMeal(raw, nowMs);
+    const refused = solveMeal(raw, nowMs);
+    return { ...refused, steps: [] };
   }
-  const originalServeMs = parsedServe.ms;
-  const proposedServeMs = originalServeMs + minutes * 60_000;
+  const proposedServeMs = parsedServe.ms + minutes * 60_000;
   const proposedLocal = formatLocalTime(proposedServeMs, raw.timezone);
-  const proposedHhmm = proposedLocal;
-
-  // Replan at serve_at + N with now pinned so nothing starts before now.
+  const name = getDishById(dishId)?.names[0] ?? dishId;
   const pushed: SolverInput = {
     ...raw,
-    serve_at: proposedHhmm,
-    dishes: raw.dishes.map((d) => {
-      if (d.id !== dishId) return d;
-      // Keep cook times; no shortening. Ready moves later via the later serve time.
-      return { id: d.id, overrides: { ...d.overrides } };
-    }),
+    serve_at: new Date(proposedServeMs).toISOString(),
   };
-
-  const plan = solveMeal(pushed, nowMs);
-  const noStepBeforeNow = plan.steps.every((s) => {
-    // Compare local HH:MM against now in plan timezone.
-    const nowLocal = formatLocalTime(nowMs, raw.timezone);
-    return s.at >= nowLocal;
-  });
-
-  if (plan.feasible && noStepBeforeNow) {
-    const name = getDishById(dishId)?.names[0] ?? dishId;
+  const plan = solveMeal(pushed, nowMs, { keepDraftSteps: true });
+  const blocking = (plan.conflicts ?? []).filter((c) => c.type !== "past_start");
+  if (plan.feasible || blocking.length === 0) {
+    const steps = clipStepsAtNow(plan.steps, nowMs, raw.timezone);
     const q = `Push dinner to ${proposedLocal}?`;
+    const noteWarnings = plan.warnings.length ? plan.warnings : warnings;
     return {
       ...plan,
       feasible: false,
       reason: `${name} is ${minutes} minutes late.`,
       question: q,
+      conflicts: undefined,
+      steps,
+      warnings: noteWarnings,
       summary: draftSummary(q),
-      card: [DRAFT_LABEL, `${name} is ${minutes} minutes late.`, q, ...plan.card.filter((l) => !l.startsWith("Note:") && l !== DRAFT_LABEL)],
+      card: buildCard(steps, false, noteWarnings),
       serve_at_local: proposedLocal,
+      timezone: raw.timezone,
     };
   }
-
-  // Try keeping original serve and delaying the late dish via hold on others — still no past steps.
-  const delayedDish: SolverInput = {
-    ...raw,
-    dishes: raw.dishes.map((d) => {
-      if (d.id !== dishId) return d;
-      const base = getDishById(d.id);
-      const prevHold = d.overrides?.hold_min ?? base?.hold_min ?? 0;
-      // Force this dish to finish later by increasing its effective timeline end:
-      // add minutes to prep as catch-up delay without shortening cook.
-      const prevPrep = d.overrides?.prep_min ?? base?.prep_min ?? 0;
-      return {
-        id: d.id,
-        overrides: { ...d.overrides, prep_min: prevPrep + minutes, hold_min: prevHold },
-      };
-    }),
-  };
-  const alt = solveMeal(delayedDish, nowMs);
-  if (alt.feasible && alt.steps.every((s) => s.at >= formatLocalTime(nowMs, raw.timezone))) {
-    const name = getDishById(dishId)?.names[0] ?? dishId;
-    const q = `Push dinner to ${proposedLocal}?`;
-    // Still propose the push when the late dish's ready moved past original serve.
-    return {
-      ...alt,
-      feasible: false,
-      reason: `${name} is ${minutes} minutes late.`,
-      question: q,
-      summary: draftSummary(q),
-      card: [DRAFT_LABEL, `${name} is ${minutes} minutes late.`, q, ...alt.card.filter((l) => l !== DRAFT_LABEL)],
-      serve_at_local: proposedLocal,
-    };
-  }
-
-  const name = getDishById(dishId)?.names[0] ?? dishId;
   const q = `${name} is ${minutes} minutes late and the rest of the menu may not fit. Push dinner to ${proposedLocal}, or drop a dish?`;
-  const steps = plan.steps.length ? plan.steps : alt.steps;
   return {
     feasible: false,
     reason: `${name} is ${minutes} minutes late.`,
     question: q,
-    conflicts: plan.conflicts ?? alt.conflicts ?? [{ type: "hold", dishes: [dishId] }],
-    steps,
+    conflicts: blocking,
+    steps: [],
     warnings,
     summary: draftSummary(q),
-    card: buildCard(steps, false, warnings),
-    serve_at_local: formatLocalTime(originalServeMs, raw.timezone),
+    card: [DRAFT_LABEL, q, DONENESS],
+    serve_at_local: proposedLocal,
     timezone: raw.timezone,
   };
 }

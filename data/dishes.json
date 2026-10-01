@@ -164,11 +164,12 @@
       ],
       "cook_min": { "typical": 18, "low": 15, "high": 22 },
       "appliance": "oven",
-      "oven_temp": { "f": 350, "c": 175 },
+      "oven_temp": { "f": 375, "c": 190 },
       "oven_units": 1,
       "burners": 0,
       "rest_min": 0,
-      "hold_min": 20
+      "hold_min": 20,
+      "proof_min": 20
     },
     {
       "id": "gravy",

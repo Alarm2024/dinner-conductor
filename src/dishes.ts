@@ -33,6 +33,8 @@ export interface Dish {
   burners: number;
   rest_min: number;
   hold_min: number;
+  /** Passive proof between prep and the oven, in minutes. Dinner rolls proof before they bake. */
+  proof_min?: number;
   /** When true, cook_min.typical is not a default — the user's recipe must supply cook_min. */
   requires_recipe_cook_min?: boolean;
 }

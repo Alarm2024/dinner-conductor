@@ -371,7 +371,7 @@
         return {
           label: "scripted router → whats_next",
           name: "whats_next",
-          args: { plan_id: state.planId, now: formatClock(state.clockMs) },
+          args: { plan_id: state.planId },
         };
       }
 
@@ -410,7 +410,7 @@
         const ap = (m[4] || "").toLowerCase();
         if (ap === "pm" && hour < 12) hour += 12;
         if (ap === "am" && hour === 12) hour = 0;
-        if (!ap && hour <= 12 && hour < 7) hour += 12; // "at 6" → 18:00
+        if (!ap && hour >= 1 && hour <= 11) hour += 12; // dinner: "at 6" → 18:00, "at 7" → 19:00
         const serve_at = String(hour).padStart(2, "0") + ":" + String(minute).padStart(2, "0");
         const ovens = /1 oven/i.test(t) ? 1 : /2 oven/i.test(t) ? 2 : 1;
         return {
@@ -431,7 +431,10 @@
       return null;
     }
 
+    const TIME_AWARE = new Set(["plan_meal", "whats_next", "running_late", "change_menu"]);
+
     async function callTool(name, args) {
+      if (TIME_AWARE.has(name)) args = { ...args, now: new Date(state.clockMs).toISOString() };
       await ensureSession();
       const reply = await rpc("tools/call", { name, arguments: args });
       return payloadFromReply(reply);

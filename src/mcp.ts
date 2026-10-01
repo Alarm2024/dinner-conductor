@@ -63,6 +63,16 @@ function guarded<A>(run: (args: A, ctx: any) => ToolResult | Promise<ToolResult>
     try {
       return await run(args, ctx);
     } catch (error) {
+      if (error instanceof Error && error.message.startsWith("now must be an ISO timestamp")) {
+        return toolResult(
+          {
+            summary: error.message,
+            card: [error.message, DONENESS],
+            error: "bad_now",
+          },
+          true,
+        );
+      }
       console.error(`tool error name=${error instanceof Error ? error.name : "Error"}`);
       return GENERIC_FAILURE;
     }
@@ -203,11 +213,13 @@ function stepMinutesUntil(at: string, nowLocal: string): number {
   return ah * 60 + am - (nh * 60 + nm);
 }
 
-/** Resolve tool `now` (ISO preferred) to epoch ms; default = server clock. */
+/** Resolve tool `now` to epoch ms. Missing means the server clock. An unreadable value is refused. */
 function resolveNowMs(now?: string): number {
   if (!now) return Date.now();
   const ms = Date.parse(now);
-  return Number.isFinite(ms) ? ms : Date.now();
+  // Never fall back silently: an unreadable `now` once made /sim plan against the server clock.
+  if (!Number.isFinite(ms)) throw new Error("now must be an ISO timestamp, e.g. 2026-11-26T16:00:00-05:00");
+  return ms;
 }
 
 export function createDinnerConductorServer(): McpServer {
@@ -403,6 +415,7 @@ export function createDinnerConductorServer(): McpServer {
       annotations: READ_ONLY,
     },
     guarded(({ plan_id, now }) => {
+      const nowMs = resolveNowMs(now);
       const plan = getPlan(plan_id);
       if (!plan) {
         return toolResult({
@@ -414,7 +427,6 @@ export function createDinnerConductorServer(): McpServer {
         });
       }
       const tz = plan.input.timezone;
-      const nowMs = resolveNowMs(now);
       const nowLocal = new Intl.DateTimeFormat("en-GB", {
         timeZone: tz,
         hour: "2-digit",

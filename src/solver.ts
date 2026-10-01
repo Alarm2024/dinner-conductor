@@ -832,7 +832,7 @@ export function applyRunningLate(
     };
   }
 
-  // Try keeping original serve and delaying only the late dish via hold on others — still no past steps.
+  // Try keeping original serve and delaying the late dish via hold on others — still no past steps.
   const delayedDish: SolverInput = {
     ...raw,
     dishes: raw.dishes.map((d) => {

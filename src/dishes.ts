@@ -33,6 +33,8 @@ export interface Dish {
   burners: number;
   rest_min: number;
   hold_min: number;
+  /** When true, cook_min.typical is not a default — the user's recipe must supply cook_min. */
+  requires_recipe_cook_min?: boolean;
 }
 
 interface DishFile {
@@ -69,6 +71,19 @@ export interface DishMatch {
 export function findDishesByName(name: string): DishMatch[] {
   const q = normalize(name);
   if (!q) return [];
+
+  // Bare "turkey" is intentionally ambiguous: breast vs whole bird.
+  if (q === "turkey") {
+    const breast = getDishById("turkey_breast");
+    const whole = getDishById("whole_turkey");
+    if (breast && whole) {
+      return [
+        { dish: breast, score: 90, matched_name: "turkey breast" },
+        { dish: whole, score: 90, matched_name: "whole turkey" },
+      ];
+    }
+  }
+
   const matches: DishMatch[] = [];
   for (const dish of loadDishes()) {
     let best = 0;
@@ -97,8 +112,11 @@ export function findDishesByName(name: string): DishMatch[] {
 }
 
 export function typicalSummary(dish: Dish): string {
-  const cook = dish.cook_min.typical;
   const temp = dish.oven_temp ? ` at ${dish.oven_temp.f} F / ${dish.oven_temp.c} C` : "";
   const appliance = dish.appliance === "none" ? "no cook" : dish.appliance;
+  if (dish.requires_recipe_cook_min) {
+    return `${dish.names[0]}: prep ${dish.prep_min} min, cook time from your recipe (${appliance}${temp}), rest ${dish.rest_min} min, hold up to ${dish.hold_min} min. Your recipe's times win.`;
+  }
+  const cook = dish.cook_min.typical;
   return `${dish.names[0]}: prep ${dish.prep_min} min, cook ${cook} min (${appliance}${temp}), rest ${dish.rest_min} min, hold up to ${dish.hold_min} min. Your recipe's times win.`;
 }

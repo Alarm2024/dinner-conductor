@@ -136,7 +136,10 @@ function parseDishList(
           card: [`No match for ${item}.`, DONENESS],
         };
       }
-      if (matches.length > 1 && matches[0]!.score < 100 && matches[0]!.score === matches[1]!.score) {
+      const tiedTop =
+        matches.length > 1 &&
+        (matches[0]!.score < 100 || matches[0]!.score === matches[1]!.score);
+      if (tiedTop && matches[0]!.score === matches[1]!.score) {
         const names = matches.slice(0, 3).map((m) => m.dish.names[0]);
         return {
           ok: false,
@@ -161,6 +164,18 @@ function parseDishList(
     return { ok: false, summary: "Add at least one dish to plan a meal.", card: ["No dishes.", DONENESS] };
   }
   return { ok: true, dishes: resolved };
+}
+
+/** Dish ids that require a user-supplied cook_min (big roasts). */
+function dishesNeedingRecipeCookMin(dishes: SolverInput["dishes"]): string[] {
+  const needs: string[] = [];
+  for (const d of dishes) {
+    const base = getDishById(d.id);
+    if (base?.requires_recipe_cook_min && d.overrides?.cook_min == null) {
+      needs.push(`cook_min:${d.id}`);
+    }
+  }
+  return needs;
 }
 
 function planPayload(plan: { plan_id: string; plan_token: string; result: import("./solver.js").SolverResult }) {
@@ -241,7 +256,9 @@ export function createDinnerConductorServer(): McpServer {
           card: [`No match for ${name}.`, DONENESS],
         });
       }
-      const ambiguous = matches.length > 1 && matches[0]!.score < 100;
+      const ambiguous =
+        matches.length > 1 &&
+        (matches[0]!.score < 100 || matches[0]!.score === matches[1]!.score);
       const rows = matches.map((m) => ({
         id: m.dish.id,
         name: m.matched_name,
@@ -342,6 +359,16 @@ export function createDinnerConductorServer(): McpServer {
 
       const parsed = parseDishList(args.dishes as Array<{ id?: string; name?: string; overrides?: DishOverride } | string>);
       if (!parsed.ok) return toolResult({ summary: parsed.summary, card: parsed.card }, true);
+
+      const cookNeeds = dishesNeedingRecipeCookMin(parsed.dishes);
+      if (cookNeeds.length > 0) {
+        const question = "How long does your recipe say to roast it?";
+        return toolResult({
+          needs: cookNeeds,
+          summary: question,
+          card: [question, DONENESS],
+        });
+      }
 
       const input: SolverInput = {
         dishes: parsed.dishes,
@@ -542,6 +569,15 @@ export function createDinnerConductorServer(): McpServer {
         return toolResult({
           summary: "The menu is empty after those changes. Add a dish to replan.",
           card: ["Empty menu.", DONENESS],
+        });
+      }
+      const cookNeeds = dishesNeedingRecipeCookMin(dishes);
+      if (cookNeeds.length > 0) {
+        const question = "How long does your recipe say to roast it?";
+        return toolResult({
+          needs: cookNeeds,
+          summary: question,
+          card: [question, DONENESS],
         });
       }
       const input: SolverInput = { ...plan.input, dishes };

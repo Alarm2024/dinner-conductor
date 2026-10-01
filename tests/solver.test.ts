@@ -240,6 +240,36 @@ describe("solver golden plans", () => {
     assert.equal(twoCooks.feasible, true, twoCooks.reason ?? twoCooks.summary);
     assert.ok(oneCook.feasible || oneCook.question);
   });
+
+  it("hits the 2-rack limit when whole turkey shares the oven with another dish", () => {
+    const earlyNow = Date.parse("2026-11-26T10:00:00-05:00");
+    const input = baseInput({
+      dishes: [
+        { id: "whole_turkey", overrides: { cook_min: 180 } },
+        { id: "stuffing", overrides: { hold_min: 0 } },
+      ],
+      ovens: 1,
+      cooks: 1,
+      serve_at: "18:00",
+    });
+    const plan = solveMeal(input, earlyNow);
+    // Whole turkey occupies both racks; stuffing must bake after or the plan asks about racks.
+    if (plan.feasible) {
+      const serveMs = parseServeAt(input.serve_at, input.timezone, earlyNow);
+      const turkeyBake = plan.steps.find((s) => s.dish_id === "whole_turkey" && s.action.startsWith("Bake"))!;
+      const stuffBake = plan.steps.find((s) => s.dish_id === "stuffing" && s.action.startsWith("Bake"))!;
+      const t0 = localToMs(turkeyBake.at, serveMs, input.timezone);
+      const t1 = t0 + 180 * 60_000;
+      const s0 = localToMs(stuffBake.at, serveMs, input.timezone);
+      const s1 = s0 + getDishById("stuffing")!.cook_min.typical * 60_000;
+      assert.ok(s0 >= t1 - 1000 || t0 >= s1 - 1000, "stuffing must not share racks with whole turkey");
+      assertResourceInvariants(plan, input);
+    } else {
+      assert.ok(plan.conflicts?.some((c) => c.type === "oven_racks"));
+      assert.ok(plan.question);
+      assert.match(plan.summary, /Draft - not workable yet/);
+    }
+  });
 });
 
 describe("solver determinism and properties", () => {

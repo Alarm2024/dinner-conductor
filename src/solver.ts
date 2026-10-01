@@ -1,6 +1,8 @@
 import type { Dish, HandsOnSegment, OvenTemp } from "./dishes.js";
 import { getDishById } from "./dishes.js";
 
+const RECIPE_COOK_QUESTION = "How long does your recipe say to roast it?";
+
 export type TempUnits = "F" | "C";
 
 export interface DishOverride {
@@ -199,6 +201,9 @@ function resolveDish(input: PlanDishInput): ResolvedDish {
   if (!base) throw new Error(`unknown_dish:${input.id}`);
   const o = input.overrides ?? {};
   const prep_min = o.prep_min ?? base.prep_min;
+  if (base.requires_recipe_cook_min && o.cook_min == null) {
+    throw new Error(`needs_cook_min:${base.id}`);
+  }
   const cook_min = o.cook_min ?? base.cook_min.typical;
   const rest_min = o.rest_min ?? base.rest_min;
   const hold_min = o.hold_min ?? base.hold_min;
@@ -1062,6 +1067,25 @@ export function solveMeal(raw: SolverInput, nowMs = Date.now()): SolverResult {
   }
 
   const serveMs = parsedServe.ms;
+
+  for (const d of input.dishes) {
+    const base = getDishById(d.id);
+    if (base?.requires_recipe_cook_min && d.overrides?.cook_min == null) {
+      const q = RECIPE_COOK_QUESTION;
+      return {
+        feasible: false,
+        reason: `${base.names[0]} needs a cook time from your recipe.`,
+        question: q,
+        conflicts: [{ type: "hold", dishes: [d.id] }],
+        steps: [],
+        warnings: ["Your recipe's times win over these typical times."],
+        summary: draftSummary(q),
+        card: [DRAFT_LABEL, q, DONENESS],
+        serve_at_local: formatLocalTime(serveMs, input.timezone),
+        timezone: input.timezone,
+      };
+    }
+  }
 
   const resolved = input.dishes.map(resolveDish);
   // Stable order: longer total first, then id (already sorted ids in input, re-sort by duration).

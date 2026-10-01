@@ -125,6 +125,22 @@ describe("MCP tools", () => {
     assert.match(String(payload.summary), /\?/);
   });
 
+  it("plan_meal asks for whole turkey roast time when cook_min is missing", async () => {
+    const reply = await send(
+      port,
+      toolCall(31, "plan_meal", {
+        dishes: ["whole_turkey"],
+        serve_at: "18:00",
+        ovens: 1,
+        now: "2026-11-26T10:00:00-05:00",
+      }),
+    );
+    const payload = parseResult(reply.body);
+    assert.ok(payload.needs);
+    assert.ok((payload.needs as string[]).some((n) => /cook_min/i.test(n)));
+    assert.match(String(payload.summary), /How long does your recipe say to roast it\?/);
+  });
+
   it("plan_meal stores a plan and read_plan / whats_next / resume_plan work", async () => {
     const planned = await send(
       port,

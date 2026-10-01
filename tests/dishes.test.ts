@@ -11,6 +11,8 @@ describe("dish library", () => {
     for (const required of [
       "roast_chicken",
       "turkey_breast",
+      "whole_turkey",
+      "standing_rib_roast",
       "roast_potatoes",
       "mashed_potatoes",
       "rice",
@@ -60,6 +62,7 @@ describe("dish library", () => {
 
   it("every hands_on segment ends within prep+cook+rest", () => {
     for (const dish of loadDishes()) {
+      if (dish.requires_recipe_cook_min) continue;
       const total = dish.prep_min + dish.cook_min.typical + dish.rest_min;
       for (const h of dish.hands_on) {
         const end = h.offset_min + h.minutes;
@@ -69,5 +72,28 @@ describe("dish library", () => {
         );
       }
     }
+  });
+
+  it('find_dish("turkey") is ambiguous between turkey breast and whole turkey', () => {
+    const matches = findDishesByName("turkey");
+    const ids = matches.map((m) => m.dish.id);
+    assert.ok(ids.includes("turkey_breast"), "expected turkey_breast");
+    assert.ok(ids.includes("whole_turkey"), "expected whole_turkey");
+    assert.ok(matches.length >= 2);
+    assert.ok(!loadDishes().find((d) => d.id === "turkey_breast")!.names.includes("turkey"));
+  });
+
+  it("splits standing rib roast from roast beef", () => {
+    const rib = findDishesByName("standing rib roast");
+    assert.equal(rib[0]?.dish.id, "standing_rib_roast");
+    assert.ok(rib[0]?.dish.requires_recipe_cook_min);
+    assert.ok(!loadDishes().find((d) => d.id === "roast_beef")!.names.some((n) => /standing rib/i.test(n)));
+  });
+
+  it("whole_turkey uses 2 oven units and requires recipe cook time", () => {
+    const whole = loadDishes().find((d) => d.id === "whole_turkey");
+    assert.ok(whole);
+    assert.equal(whole!.oven_units, 2);
+    assert.equal(whole!.requires_recipe_cook_min, true);
   });
 });

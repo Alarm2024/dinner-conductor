@@ -18,7 +18,7 @@
     },
     {
       "id": "turkey_breast",
-      "names": ["turkey breast", "roast turkey breast", "turkey"],
+      "names": ["turkey breast", "roast turkey breast"],
       "prep_min": 15,
       "hands_on": [
         { "offset_min": 0, "minutes": 15, "label": "season turkey" }
@@ -30,6 +30,22 @@
       "burners": 0,
       "rest_min": 20,
       "hold_min": 40
+    },
+    {
+      "id": "whole_turkey",
+      "names": ["whole turkey", "roast turkey", "turkey bird"],
+      "prep_min": 30,
+      "hands_on": [
+        { "offset_min": 0, "minutes": 30, "label": "season and prepare turkey" }
+      ],
+      "cook_min": { "typical": 240, "low": 180, "high": 360 },
+      "appliance": "oven",
+      "oven_temp": { "f": 325, "c": 165 },
+      "oven_units": 2,
+      "burners": 0,
+      "rest_min": 30,
+      "hold_min": 45,
+      "requires_recipe_cook_min": true
     },
     {
       "id": "roast_potatoes",
@@ -293,7 +309,7 @@
     },
     {
       "id": "roast_beef",
-      "names": ["roast beef", "beef roast", "standing rib"],
+      "names": ["roast beef", "beef roast"],
       "prep_min": 15,
       "hands_on": [
         { "offset_min": 0, "minutes": 15, "label": "season beef" }
@@ -305,6 +321,22 @@
       "burners": 0,
       "rest_min": 20,
       "hold_min": 35
+    },
+    {
+      "id": "standing_rib_roast",
+      "names": ["standing rib roast", "standing rib", "prime rib", "rib roast"],
+      "prep_min": 20,
+      "hands_on": [
+        { "offset_min": 0, "minutes": 20, "label": "season rib roast" }
+      ],
+      "cook_min": { "typical": 150, "low": 90, "high": 240 },
+      "appliance": "oven",
+      "oven_temp": { "f": 350, "c": 175 },
+      "oven_units": 2,
+      "burners": 0,
+      "rest_min": 25,
+      "hold_min": 40,
+      "requires_recipe_cook_min": true
     },
     {
       "id": "baked_mac_and_cheese",

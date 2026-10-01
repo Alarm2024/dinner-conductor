@@ -176,7 +176,7 @@ describe("MCP tools", () => {
       ).body,
     );
     assert.match(String(late.changed ?? late.summary), /10 minutes/);
-    assert.match(String(late.summary), /cook times were left/i);
+    assert.match(String(late.summary), /Push dinner to 18:10\?/);
 
     const changed = parseResult(
       (

@@ -778,6 +778,108 @@ export function solveMeal(raw: SolverInput, nowMs = Date.now()): SolverResult {
   };
 }
 
+/**
+ * Apply a running-late delay: move dish X's ready time N minutes later.
+ * Steps before now stay done; nothing is scheduled before now.
+ * Prefer proposing serve_at + N when not-yet-started dishes can still fit hold windows.
+ * Never shortens a cook time.
+ */
+export function applyRunningLate(
+  raw: SolverInput,
+  dishId: string,
+  minutes: number,
+  nowMs = Date.now(),
+): SolverResult {
+  const warnings = ["Your recipe's times win over these typical times."];
+  const parsedServe = parseServeAtDetailed(raw.serve_at, raw.timezone, nowMs);
+  if (!parsedServe.ok || parsedServe.past_today) {
+    return solveMeal(raw, nowMs);
+  }
+  const originalServeMs = parsedServe.ms;
+  const proposedServeMs = originalServeMs + minutes * 60_000;
+  const proposedLocal = formatLocalTime(proposedServeMs, raw.timezone);
+  const proposedHhmm = proposedLocal;
+
+  // Replan at serve_at + N with now pinned so nothing starts before now.
+  const pushed: SolverInput = {
+    ...raw,
+    serve_at: proposedHhmm,
+    dishes: raw.dishes.map((d) => {
+      if (d.id !== dishId) return d;
+      // Keep cook times; no shortening. Ready moves later via the later serve time.
+      return { id: d.id, overrides: { ...d.overrides } };
+    }),
+  };
+
+  const plan = solveMeal(pushed, nowMs);
+  const noStepBeforeNow = plan.steps.every((s) => {
+    // Compare local HH:MM against now in plan timezone.
+    const nowLocal = formatLocalTime(nowMs, raw.timezone);
+    return s.at >= nowLocal;
+  });
+
+  if (plan.feasible && noStepBeforeNow) {
+    const name = getDishById(dishId)?.names[0] ?? dishId;
+    const q = `Push dinner to ${proposedLocal}?`;
+    return {
+      ...plan,
+      feasible: false,
+      reason: `${name} is ${minutes} minutes late.`,
+      question: q,
+      summary: q,
+      card: [`${name} is ${minutes} minutes late.`, q, ...plan.card.filter((l) => !l.startsWith("Note:"))],
+      serve_at_local: proposedLocal,
+    };
+  }
+
+  // Try keeping original serve and delaying only the late dish via hold on others — still no past steps.
+  const delayedDish: SolverInput = {
+    ...raw,
+    dishes: raw.dishes.map((d) => {
+      if (d.id !== dishId) return d;
+      const base = getDishById(d.id);
+      const prevHold = d.overrides?.hold_min ?? base?.hold_min ?? 0;
+      // Force this dish to finish later by increasing its effective timeline end:
+      // add minutes to prep as catch-up delay without shortening cook.
+      const prevPrep = d.overrides?.prep_min ?? base?.prep_min ?? 0;
+      return {
+        id: d.id,
+        overrides: { ...d.overrides, prep_min: prevPrep + minutes, hold_min: prevHold },
+      };
+    }),
+  };
+  const alt = solveMeal(delayedDish, nowMs);
+  if (alt.feasible && alt.steps.every((s) => s.at >= formatLocalTime(nowMs, raw.timezone))) {
+    const name = getDishById(dishId)?.names[0] ?? dishId;
+    const q = `Push dinner to ${proposedLocal}?`;
+    // Still propose the push when the late dish's ready moved past original serve.
+    return {
+      ...alt,
+      feasible: false,
+      reason: `${name} is ${minutes} minutes late.`,
+      question: q,
+      summary: q,
+      card: [`${name} is ${minutes} minutes late.`, q, ...alt.card],
+      serve_at_local: proposedLocal,
+    };
+  }
+
+  const name = getDishById(dishId)?.names[0] ?? dishId;
+  const q = `${name} is ${minutes} minutes late and the rest of the menu may not fit. Push dinner to ${proposedLocal}, or drop a dish?`;
+  const steps = plan.steps.length ? plan.steps : alt.steps;
+  return {
+    feasible: false,
+    reason: `${name} is ${minutes} minutes late.`,
+    question: q,
+    steps,
+    warnings,
+    summary: q,
+    card: buildCard(steps, false, warnings),
+    serve_at_local: formatLocalTime(originalServeMs, raw.timezone),
+    timezone: raw.timezone,
+  };
+}
+
 /** Deep-stable JSON clone for equality checks in tests. */
 export function stablePlanFingerprint(result: SolverResult): string {
   return JSON.stringify({

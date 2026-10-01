@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { getDishById, loadDishes } from "../src/dishes.js";
 import {
+  applyRunningLate,
   formatLocalTime,
   parseServeAt,
   solveMeal,
@@ -346,6 +347,33 @@ describe("relative to now", () => {
     const nowLocal = formatLocalTime(NOW, TZ);
     for (const step of plan.steps) {
       assert.ok(step.at >= nowLocal, `step ${step.at} ${step.action} is before now ${nowLocal}`);
+    }
+  });
+});
+
+describe("running late looks forward", () => {
+  it("at 16:30 for an 18:00 dinner, chicken +15 proposes 18:15 with no step before 16:30", () => {
+    const now1630 = Date.parse("2026-11-26T16:30:00-05:00");
+    const base = solveMeal(
+      baseInput({
+        dishes: [{ id: "chicken_thighs" }, { id: "roast_potatoes" }, { id: "green_beans" }],
+        serve_at: "18:00",
+      }),
+      Date.parse("2026-11-26T15:00:00-05:00"),
+    );
+    assert.equal(base.feasible, true, base.reason ?? base.summary);
+    const late = applyRunningLate(
+      baseInput({
+        dishes: [{ id: "chicken_thighs" }, { id: "roast_potatoes" }, { id: "green_beans" }],
+        serve_at: "18:00",
+      }),
+      "chicken_thighs",
+      15,
+      now1630,
+    );
+    assert.match(late.question ?? late.summary, /Push dinner to 18:15\?/);
+    for (const step of late.steps) {
+      assert.ok(step.at >= "16:30", `step ${step.at} ${step.action} is before 16:30`);
     }
   });
 });

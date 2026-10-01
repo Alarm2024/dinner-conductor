@@ -2,7 +2,7 @@ import { McpServer } from "@modelcontextprotocol/server";
 import * as z from "zod/v4";
 import { findDishesByName, getDishById, typicalSummary } from "./dishes.js";
 import { getPlan, rebuildFromToken, replacePlan, storePlan } from "./plans.js";
-import { solveMeal, type DishOverride, type SolverInput, type TempUnits } from "./solver.js";
+import { applyRunningLate, solveMeal, type DishOverride, type SolverInput, type TempUnits } from "./solver.js";
 
 const SERVER_VERSION = "1.0.0";
 const OUT_OF_SCOPE =
@@ -422,7 +422,7 @@ export function createDinnerConductorServer(): McpServer {
     "running_late",
     {
       title: "Replan when a dish is behind",
-      description: `Mark a dish as running late by a number of minutes and replan. Adds delay to that dish's prep; never shortens a cook time on its own. Returns replanned steps and what changed in one sentence. ${OUT_OF_SCOPE}`,
+      description: `Mark a dish as running late by a number of minutes and replan looking forward from now. Moves that dish's ready time later; never shortens a cook time. May ask to push serve time. ${OUT_OF_SCOPE}`,
       inputSchema: z.object({
         plan_id: z.string().min(1).max(64),
         dish: z.string().min(1).max(64).describe("Dish id or name"),
@@ -461,26 +461,20 @@ export function createDinnerConductorServer(): McpServer {
           card: ["Dish not on plan.", DONENESS],
         });
       }
-      const input: SolverInput = {
-        ...plan.input,
-        dishes: plan.input.dishes.map((d) => {
-          if (d.id !== dishId) return d;
-          const base = getDishById(d.id)!;
-          const prevPrep = d.overrides?.prep_min ?? base.prep_min;
-          return {
-            id: d.id,
-            overrides: { ...d.overrides, prep_min: prevPrep + minutes },
-          };
-        }),
-      };
-      const result = solveMeal(input, resolveNowMs(now));
-      const updated = replacePlan(plan_id, input, result)!;
+      const nowMs = resolveNowMs(now);
+      const result = applyRunningLate(plan.input, dishId, minutes, nowMs);
       const name = getDishById(dishId)!.names[0];
-      const changed = `Added ${minutes} minutes of delay to ${name} prep and rebuilt the timeline; cook times were left as set.`;
+      // Persist the proposed serve time when we ask to push dinner.
+      const pushedServe = result.serve_at_local || plan.input.serve_at;
+      const input: SolverInput = { ...plan.input, serve_at: pushedServe };
+      const updated = replacePlan(plan_id, input, result)!;
+      const changed = result.question
+        ? `${name} is ${minutes} minutes late. ${result.question}`
+        : `${name} is ${minutes} minutes late; cook times were left as set.`;
       return toolResult({
         ...planPayload(updated),
         changed,
-        summary: `${changed} ${result.summary}`,
+        summary: result.summary,
       });
     }),
   );

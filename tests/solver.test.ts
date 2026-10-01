@@ -160,7 +160,10 @@ describe("solver golden plans", () => {
     assert.ok(bakeTemps.every((t) => t === "425 F"));
   });
 
-  it("plans a 6-dish holiday meal with 1 oven at 3 temperatures by sequencing", () => {
+  it("plans a 6-dish holiday meal with 1 oven by sequencing temp groups", () => {
+    // Morning "now" so the afternoon turkey prep is not refused as past-start.
+    // Two cooks so stuffing and casserole prep can overlap before the shared 350 F bake.
+    const holidayNow = Date.parse("2026-11-26T10:00:00-05:00");
     const input = baseInput({
       dishes: [
         { id: "turkey_breast" },
@@ -171,22 +174,37 @@ describe("solver golden plans", () => {
         { id: "gravy" },
       ],
       ovens: 1,
-      cooks: 1,
+      cooks: 2,
       burners: 4,
       serve_at: "16:00",
     });
-    const plan = solveMeal(input, NOW);
-    if (plan.feasible) {
-      assert.ok(plan.steps.some((s) => s.dish_id === "turkey_breast"));
-      assert.ok(plan.steps.some((s) => s.dish_id === "stuffing"));
-      assert.ok(plan.card.length > 3);
-      assertResourceInvariants(plan, input);
-    } else {
-      assert.ok(plan.question);
-      assert.ok(plan.reason);
-      assert.equal((plan.question.match(/\?/g) ?? []).length, 1);
+    const plan = solveMeal(input, holidayNow);
+    assert.equal(plan.feasible, true, plan.question ?? plan.reason ?? plan.summary);
+    assert.ok(plan.steps.some((s) => s.dish_id === "turkey_breast"));
+    assert.ok(plan.steps.some((s) => s.dish_id === "stuffing"));
+    assert.ok(plan.card.length > 3);
+    assertResourceInvariants(plan, input);
+    // Stuffing and casserole bake while the turkey rests.
+    const serveMs = parseServeAt(input.serve_at, input.timezone, holidayNow);
+    const rest = plan.steps.find((s) => s.dish_id === "turkey_breast" && s.action.startsWith("Rest"));
+    const turkeyReady = plan.steps.find(
+      (s) => s.dish_id === "turkey_breast" && (s.action.includes("ready") || s.action.startsWith("Hold")),
+    );
+    assert.ok(rest && turkeyReady);
+    const restStart = localToMs(rest!.at, serveMs, input.timezone);
+    const restEnd = localToMs(turkeyReady!.at, serveMs, input.timezone);
+    for (const id of ["stuffing", "green_bean_casserole"]) {
+      const bake = plan.steps.find((s) => s.dish_id === id && s.action.startsWith("Bake"));
+      assert.ok(bake, id);
+      const bakeStart = localToMs(bake!.at, serveMs, input.timezone);
+      const cook = getDishById(id)!.cook_min.typical;
+      const bakeEnd = bakeStart + cook * 60_000;
+      assert.ok(
+        bakeStart < restEnd + 1000 && bakeEnd > restStart - 1000,
+        `${id} should bake while turkey rests (bake ${bake!.at}+${cook}m, rest ${rest!.at}-${turkeyReady!.at})`,
+      );
     }
-    assert.equal(stablePlanFingerprint(plan), stablePlanFingerprint(solveMeal(input, NOW)));
+    assert.equal(stablePlanFingerprint(plan), stablePlanFingerprint(solveMeal(input, holidayNow)));
   });
 
   it("uses a second oven when two temperatures overlap", () => {
@@ -413,7 +431,7 @@ describe("oven preheat", () => {
 
     const downInput = baseInput({
       dishes: [
-        { id: "dinner_rolls", overrides: { hold_min: 90 } },
+        { id: "roast_potatoes", overrides: { hold_min: 90 } },
         { id: "stuffing", overrides: { hold_min: 0 } },
       ],
       ovens: 1,
@@ -423,14 +441,14 @@ describe("oven preheat", () => {
     const down = solveMeal(downInput, NOW);
     assert.equal(down.feasible, true, down.reason ?? down.summary);
     const serveDown = parseServeAt(downInput.serve_at, downInput.timezone, NOW);
-    const rollsBake = down.steps.find((s) => s.dish_id === "dinner_rolls" && s.action.startsWith("Bake"))!;
+    const hotBake = down.steps.find((s) => s.dish_id === "roast_potatoes" && s.action.startsWith("Bake"))!;
     const stuffBake = down.steps.find((s) => s.dish_id === "stuffing" && s.action.startsWith("Bake"))!;
-    const rollsStart = localToMs(rollsBake.at, serveDown, downInput.timezone);
-    const stuffStart = localToMs(stuffBake.at, serveDown, downInput.timezone);
-    assert.ok(rollsStart < stuffStart, "hotter rolls should bake before cooler stuffing");
+    const hotStart = localToMs(hotBake.at, serveDown, downInput.timezone);
+    const coolStart = localToMs(stuffBake.at, serveDown, downInput.timezone);
+    assert.ok(hotStart < coolStart, "hotter potatoes should bake before cooler stuffing");
     const cool = down.steps.find((s) => /^Open door to cool to 350 F$/.test(s.action));
     assert.ok(cool, "expected Open door to cool before temperature decrease");
-    assert.equal(stuffStart - localToMs(cool!.at, serveDown, downInput.timezone), 10 * 60_000);
+    assert.equal(coolStart - localToMs(cool!.at, serveDown, downInput.timezone), 10 * 60_000);
   });
 });
 

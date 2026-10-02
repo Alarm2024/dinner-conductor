@@ -261,6 +261,37 @@ describe("MCP tools", () => {
     }
   });
 
+  it("(b) whats_next after a refused plan says there is no workable plan yet", async () => {
+    const planned = parseResult(
+      (
+        await send(
+          port,
+          toolCall(40, "plan_meal", {
+            dishes: ["turkey_breast", "stuffing", "mashed_potatoes", "green_bean_casserole", "dinner_rolls", "gravy"],
+            serve_at: "19:00",
+            timezone: "America/New_York",
+            ovens: 1,
+            cooks: 1,
+            now: "2026-11-26T16:00:00-05:00",
+          }),
+        )
+      ).body,
+    );
+    assert.equal(planned.feasible, false);
+    assert.ok(planned.plan_id);
+    const next = parseResult(
+      (
+        await send(port, toolCall(41, "whats_next", { plan_id: planned.plan_id, now: "2026-11-26T16:00:00-05:00" }))
+      ).body,
+    );
+    assert.equal(next.next, null);
+    assert.equal(next.current, null);
+    assert.match(String(next.summary), /^There is no workable plan yet\. One oven cannot bake/);
+    assert.doesNotMatch(String(next.summary), /All steps are done/);
+    assert.equal((next.card as string[])[0], "No workable plan yet.");
+    assert.equal((next.card as string[]).includes("Next: none"), false);
+  });
+
   it("plan_meal stores a plan and read_plan / whats_next / resume_plan work", async () => {
     const planned = await send(
       port,
@@ -312,7 +343,8 @@ describe("MCP tools", () => {
       ).body,
     );
     assert.match(String(late.changed ?? late.summary), /10 minutes/);
-    assert.match(String(late.summary), /Push dinner to 18:10\?/);
+    assert.equal(late.feasible, true);
+    assert.match(String(late.summary), /Dinner moves to 18:10\./);
 
     const changed = parseResult(
       (

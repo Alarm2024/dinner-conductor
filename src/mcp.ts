@@ -426,6 +426,18 @@ export function createDinnerConductorServer(): McpServer {
           card: ["Plan not found.", DONENESS],
         });
       }
+      if (!plan.result.feasible) {
+        // A refused or draft plan has no steps to walk. "All steps are done"
+        // here read as if dinner were finished when there never was a plan.
+        const question = plan.result.question;
+        return toolResult({
+          current: null,
+          next: null,
+          minutes_until_next: null,
+          summary: question ? `There is no workable plan yet. ${question}` : "There is no workable plan yet.",
+          card: ["No workable plan yet.", ...(question ? [question] : []), DONENESS],
+        });
+      }
       const tz = plan.input.timezone;
       const nowLocal = new Intl.DateTimeFormat("en-GB", {
         timeZone: tz,

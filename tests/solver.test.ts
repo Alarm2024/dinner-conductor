@@ -216,8 +216,8 @@ describe("solver golden plans", () => {
     }
     assert.equal(stablePlanFingerprint(plan), stablePlanFingerprint(solveMeal(core, holidayNow)));
 
-    // Dinner rolls stay at 375 F, so they cannot share the 350 F side bake.
-    // Sequencing is attempted; the hold windows do not cover a third oven block.
+    // Dinner rolls bake at 350 F like the sides. With the 325 F turkey, one oven
+    // still does not fit inside the hold windows; a second oven does.
     const withRolls = solveMeal(
       baseInput({
         dishes: [...core.dishes, { id: "dinner_rolls" }],
@@ -228,10 +228,11 @@ describe("solver golden plans", () => {
       }),
       holidayNow,
     );
-    assert.equal(getDishById("dinner_rolls")!.oven_temp!.f, 375);
+    assert.equal(getDishById("dinner_rolls")!.oven_temp!.f, 350);
     assert.equal(withRolls.feasible, false);
     assert.equal(withRolls.steps.length, 0);
     assert.ok(withRolls.conflicts?.some((c) => c.type === "oven_temp" || c.type === "oven_racks"));
+    assert.match(withRolls.question ?? "", /Is a second oven free\?/);
   });
 
   it("uses a second oven when two temperatures overlap", () => {
@@ -593,7 +594,8 @@ describe("running late looks forward", () => {
       15,
       now1630,
     );
-    assert.match(late.question ?? late.summary, /Push dinner to 18:15\?/);
+    assert.equal(late.feasible, true, late.summary);
+    assert.match(late.summary, /Dinner moves to 18:15\./);
     assert.equal(late.serve_at_local, "18:15");
     for (const step of late.steps) {
       assert.ok(step.at >= "16:30", `step ${step.at} ${step.action} is before 16:30`);
@@ -612,7 +614,8 @@ describe("running late looks forward", () => {
       now1710,
     );
     assert.equal(late.serve_at_local, "18:15");
-    assert.match(late.question ?? "", /Push dinner to 18:15\?/);
+    assert.equal(late.feasible, true, late.summary);
+    assert.match(late.summary, /Dinner moves to 18:15\./);
     for (const step of late.steps) {
       assert.ok(step.at >= "17:10", `draft step ${step.at} ${step.action} is before now`);
     }
@@ -668,7 +671,7 @@ describe("solver regressions", () => {
       NOW,
     );
     assert.equal(late.serve_at_local, "18:20");
-    assert.match(late.question ?? "", /18:20/);
+    assert.match(late.summary, /Dinner moves to 18:20\./);
   });
 
   it("keeps turkey_breast and whole_turkey explicit", () => {
@@ -843,10 +846,13 @@ describe("solver regressions", () => {
     assert.equal(plan.summary.includes("start at 18:05"), false);
   });
 
-  it("sequences 375 F dinner rolls instead of sharing the 350 F bake", () => {
+  it("bakes dinner rolls at 350 F for 20-25 min after a 30 min proof", () => {
+    // King Arthur, Sally's Baking Addiction and Taste of Home all bake soft
+    // dinner rolls at 350 F for about 20-25 min; their rise is 30-60 min.
     const rolls = getDishById("dinner_rolls")!;
-    assert.equal(rolls.oven_temp!.f, 375);
-    assert.equal(rolls.oven_temp!.c, 190);
+    assert.deepEqual(rolls.oven_temp, { f: 350, c: 175 });
+    assert.deepEqual(rolls.cook_min, { typical: 22, low: 20, high: 25 });
+    assert.equal(rolls.proof_min, 30);
     const plan = solveMeal(
       baseInput({
         dishes: [{ id: "stuffing" }, { id: "dinner_rolls" }, { id: "gravy" }],
@@ -859,16 +865,15 @@ describe("solver regressions", () => {
     assert.equal(plan.feasible, true, plan.question ?? plan.reason ?? plan.summary);
     const rollBake = plan.steps.find((s) => s.dish_id === "dinner_rolls" && s.action.startsWith("Bake"))!;
     const stuffBake = plan.steps.find((s) => s.dish_id === "stuffing" && s.action.startsWith("Bake"))!;
-    assert.equal(rollBake.temp, "375 F");
+    assert.equal(rollBake.temp, "350 F");
     assert.equal(stuffBake.temp, "350 F");
     const serveMs = parseServeAt("18:00", TZ, morning);
-    const r0 = localToMs(rollBake.at, serveMs, TZ);
-    const s0 = localToMs(stuffBake.at, serveMs, TZ);
-    const r1 = r0 + rolls.cook_min.typical * 60_000;
-    const s1 = s0 + getDishById("stuffing")!.cook_min.typical * 60_000;
-    assert.ok(r0 >= s1 - 1000 || s0 >= r1 - 1000, "rolls and stuffing share the oven");
     const proof = plan.steps.find((s) => s.dish_id === "dinner_rolls" && s.action.startsWith("Proof"))!;
-    assert.ok(proof.at < rollBake.at);
+    assert.equal(
+      localToMs(rollBake.at, serveMs, TZ) - localToMs(proof.at, serveMs, TZ),
+      30 * 60_000,
+      `proof ${proof.at}, bake ${rollBake.at}`,
+    );
   });
 
   it("labels ovens and does not hold salad warm", () => {
@@ -899,5 +904,123 @@ describe("solver regressions", () => {
     assert.equal(salad.steps.some((s) => /hold salad warm/i.test(s.action)), false);
     const held = salad.steps.find((s) => s.dish_id === "salad" && s.action.startsWith("Hold"));
     if (held) assert.equal(held.action, "Hold salad");
+  });
+});
+
+describe("tester findings on d47c48a", () => {
+  const at1600 = Date.parse("2026-11-26T16:00:00-05:00");
+  const sunday = baseInput({
+    dishes: [
+      { id: "roast_chicken" },
+      { id: "roast_potatoes" },
+      { id: "mashed_potatoes" },
+      { id: "green_beans" },
+      { id: "gravy" },
+    ],
+    ovens: 1,
+    cooks: 1,
+    burners: 4,
+    serve_at: "19:00",
+  });
+  const thanksgiving = (ovens: number) =>
+    baseInput({
+      dishes: [
+        { id: "turkey_breast" },
+        { id: "stuffing" },
+        { id: "mashed_potatoes" },
+        { id: "green_bean_casserole" },
+        { id: "dinner_rolls" },
+        { id: "gravy" },
+      ],
+      ovens,
+      cooks: 1,
+      burners: 4,
+      serve_at: "19:00",
+    });
+
+  it("(a) plans the Sunday roast with one oven and one cook, as 7eb48cb did", () => {
+    const plan = solveMeal(sunday, at1600);
+    assert.equal(plan.feasible, true, plan.question ?? plan.reason ?? plan.summary);
+    assert.match(plan.summary, /start at 16:50/);
+    assert.equal(stablePlanFingerprint(plan), stablePlanFingerprint(solveMeal(sunday, at1600)));
+    // One cook: hands-on steps never overlap.
+    const hands = plan.steps
+      .filter((s) => s.hands_on)
+      .map((s) => {
+        const dish = getDishById(s.dish_id)!;
+        const label = s.action.replace(/^Start /, "");
+        const minutes = dish.hands_on.find((h) => h.label === label)?.minutes ?? 0;
+        const [h, m] = s.at.split(":").map(Number);
+        return { start: h! * 60 + m!, end: h! * 60 + m! + minutes, what: `${s.at} ${s.action}` };
+      })
+      .sort((a, b) => a.start - b.start);
+    for (let i = 1; i < hands.length; i++) {
+      assert.ok(hands[i]!.start >= hands[i - 1]!.end, `${hands[i - 1]!.what} overlaps ${hands[i]!.what}`);
+    }
+  });
+
+  it("(e) running late with a plan that still fits is a timeline, not a draft", () => {
+    const late = applyRunningLate(sunday, "roast_chicken", 20, at1600);
+    assert.equal(late.feasible, true, late.summary);
+    assert.equal(late.serve_at_local, "19:20");
+    assert.ok(late.steps.length > 0, "Sunday late shows a timeline");
+    assert.doesNotMatch(late.summary, /Draft/);
+    assert.equal(late.card.includes("Draft - not workable yet"), false);
+    assert.match(late.summary, /roast chicken is 20 minutes late\. Dinner moves to 19:20\./);
+  });
+
+  it("(e) running late that does not fit is still a draft with no timeline", () => {
+    const late = applyRunningLate(thanksgiving(1), "turkey_breast", 20, at1600);
+    assert.equal(late.feasible, false);
+    assert.equal(late.steps.length, 0);
+    assert.match(late.summary, /^Draft - not workable yet\./);
+  });
+
+  it("(f) Thanksgiving with one oven asks for a second oven, because two fit", () => {
+    const one = solveMeal(thanksgiving(1), at1600);
+    assert.equal(one.feasible, false);
+    assert.ok(
+      (one.conflicts ?? []).length > 0 && (one.conflicts ?? []).every((c) => c.type === "oven_temp" || c.type === "oven_racks"),
+      JSON.stringify(one.conflicts),
+    );
+    assert.equal(
+      one.question,
+      "One oven cannot bake turkey breast at 325 F and dinner rolls, stuffing, and green bean casserole at 350 F in time for 19:00. Is a second oven free?",
+    );
+    const two = solveMeal(thanksgiving(2), at1600);
+    assert.equal(two.feasible, true, two.question ?? two.reason ?? two.summary);
+  });
+
+  it("(f) an oven clash a second oven does not fix names the dish that would wait", () => {
+    const plan = solveMeal(
+      baseInput({
+        dishes: [{ id: "stuffing" }, { id: "roast_potatoes" }, { id: "baked_salmon" }],
+        ovens: 2,
+        cooks: 2,
+        serve_at: "18:00",
+      }),
+      Date.parse("2026-11-26T08:00:00-05:00"),
+    );
+    assert.equal(plan.feasible, false);
+    assert.match(plan.question ?? "", /could bake first, then .+, but .+ would wait longer than the hold time allows\. Is that OK\?/);
+    assert.doesNotMatch(plan.question ?? "", /rests/);
+  });
+
+  it("(g) bake and preheat steps carry their oven, and a two-oven card names it", () => {
+    const plan = solveMeal(thanksgiving(2), at1600);
+    assert.equal(plan.feasible, true, plan.question ?? plan.reason ?? plan.summary);
+    for (const step of plan.steps) {
+      const ovenStep = step.action.startsWith("Bake") || step.action.startsWith("Preheat") || step.action.startsWith("Open door");
+      if (ovenStep) assert.match(String(step.oven_id), /^oven_[12]$/, `${step.at} ${step.action}`);
+      else assert.equal(step.oven_id, null, `${step.at} ${step.action}`);
+    }
+    const bakeLines = plan.card.filter((line) => / — (Bake|Preheat) /.test(line));
+    assert.ok(bakeLines.length > 0);
+    for (const line of bakeLines) assert.match(line, /\(oven [12], \d+ F\)$/, line);
+
+    // One oven: the step still says oven_1, the card stays as it was.
+    const single = solveMeal(sunday, at1600);
+    assert.ok(single.steps.filter((s) => s.action.startsWith("Bake")).every((s) => s.oven_id === "oven_1"));
+    assert.equal(single.card.some((line) => line.includes("(oven 1")), false);
   });
 });

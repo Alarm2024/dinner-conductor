@@ -41,6 +41,8 @@ export interface PlanStep {
   hands_on: boolean;
   appliance: string;
   temp: string | null;
+  /** `oven_1` / `oven_2` on preheat, cool-down and bake steps; null on every other step. */
+  oven_id: string | null;
 }
 
 export type ConflictType = "hands_on" | "oven_temp" | "oven_racks" | "burners" | "hold" | "past_start" | "past_serve" | "serve_at";
@@ -597,7 +599,10 @@ function conflictQuestion(conflict: Conflict, placements: Placement[]): string {
     const b = placements.find((p) => p.dish.id === conflict.dish_ids[1])!;
     const holdable = [a, b].sort((x, y) => y.dish.hold_min - x.dish.hold_min || x.dish.id.localeCompare(y.dish.id))[0];
     const other = holdable === a ? b : a;
-    return `${names[0]} and ${names[1]} need different oven temperatures at the same time. ${holdable.dish.name} can bake while ${other.dish.name} rests. Is that OK?`;
+    // The longer-holding dish would bake first and wait. d47c48a said "turkey
+    // breast can bake while stuffing rests": stuffing has no rest, and the
+    // search gets here when that wait is longer than the hold window.
+    return `${names[0]} and ${names[1]} need different oven temperatures at the same time. ${holdable.dish.name} could bake first, then ${other.dish.name}, but ${holdable.dish.name} would wait longer than the hold time allows. Is that OK?`;
   }
   if (conflict.type === "hands_on") {
     return `${names.join(" and ")} need hands-on work at the same time. Can one dish wait, or is a second cook available?`;
@@ -628,6 +633,7 @@ function buildSteps(placements: Placement[], serveMs: number, input: SolverInput
         placements.find((p) => p.dish.id === ph.dish_id)?.dish.oven_temp ?? { f: ph.temp_f, c: Math.round(((ph.temp_f - 32) * 5) / 9) },
         input.units,
       ),
+      oven_id: `oven_${ph.oven_index + 1}`,
     });
   }
 
@@ -642,6 +648,7 @@ function buildSteps(placements: Placement[], serveMs: number, input: SolverInput
         hands_on: true,
         appliance: p.dish.appliance === "none" ? "counter" : p.dish.appliance,
         temp: null,
+        oven_id: null,
       });
     }
 
@@ -655,6 +662,7 @@ function buildSteps(placements: Placement[], serveMs: number, input: SolverInput
         hands_on: false,
         appliance: "counter",
         temp: null,
+        oven_id: null,
       });
     }
 
@@ -674,6 +682,7 @@ function buildSteps(placements: Placement[], serveMs: number, input: SolverInput
         hands_on: false,
         appliance: p.dish.appliance,
         temp: tempLabel(p.dish.oven_temp, input.units),
+        oven_id: p.dish.appliance === "oven" && p.oven_index !== null ? `oven_${p.oven_index + 1}` : null,
       });
     }
 
@@ -688,6 +697,7 @@ function buildSteps(placements: Placement[], serveMs: number, input: SolverInput
         hands_on: true,
         appliance: p.dish.appliance === "none" ? "counter" : p.dish.appliance,
         temp: null,
+        oven_id: null,
       });
     }
 
@@ -701,6 +711,7 @@ function buildSteps(placements: Placement[], serveMs: number, input: SolverInput
         hands_on: false,
         appliance: "none",
         temp: null,
+        oven_id: null,
       });
     }
 
@@ -718,6 +729,7 @@ function buildSteps(placements: Placement[], serveMs: number, input: SolverInput
       hands_on: false,
       appliance: "none",
       temp: null,
+      oven_id: null,
     });
   }
 
@@ -729,6 +741,7 @@ function buildSteps(placements: Placement[], serveMs: number, input: SolverInput
     hands_on: false,
     appliance: "none",
     temp: null,
+    oven_id: null,
   });
 
   steps.sort((a, b) => {
@@ -738,10 +751,13 @@ function buildSteps(placements: Placement[], serveMs: number, input: SolverInput
   return steps;
 }
 
-function buildCard(steps: PlanStep[], feasible: boolean, warnings: string[]): string[] {
-  const lines = steps.filter((s) => s.action !== "Serve" || true).map((s) => {
-    const temp = s.temp ? ` (${s.temp})` : "";
-    return `${s.at} — ${s.action}${temp}`;
+function buildCard(steps: PlanStep[], feasible: boolean, warnings: string[], ovens = 1): string[] {
+  const lines = steps.map((s) => {
+    // With two ovens, a preheat or bake line that does not say which oven is
+    // an instruction the cook cannot follow.
+    const oven = ovens > 1 && s.oven_id ? `oven ${s.oven_id.slice("oven_".length)}` : null;
+    const detail = [oven, s.temp].filter(Boolean).join(", ");
+    return `${s.at} — ${s.action}${detail ? ` (${detail})` : ""}`;
   });
   if (!feasible) lines.unshift(DRAFT_LABEL);
   for (const w of warnings) lines.push(`Note: ${w}`);
@@ -765,6 +781,12 @@ function spokenSummary(placements: Placement[], serveMs: number, input: SolverIn
         : `${names.slice(0, -1).join(", ")}, and ${names[names.length - 1]}`;
   const start = earliestPlanStart(placements, input);
   return `For ${list} at ${formatLocalTime(serveMs, input.timezone)}, start at ${formatLocalTime(start, input.timezone)}. ${DONENESS}`;
+}
+
+function listNames(names: string[]): string {
+  if (names.length <= 1) return names[0] ?? "";
+  if (names.length === 2) return `${names[0]} and ${names[1]}`;
+  return `${names.slice(0, -1).join(", ")}, and ${names[names.length - 1]}`;
 }
 
 function permutations<T>(items: T[]): T[][] {
@@ -957,9 +979,9 @@ function advancePrepLead(placements: Placement[], nowMs: number): boolean {
 /**
  * List-scheduling for hands-on (and other) conflicts: repeatedly shift the
  * hold-capable dish that clears the first conflict, deterministic tie-break by id.
- * Hands-on prep slides earlier inside the hold window before a whole-dish shift.
- * When `order` is set, re-enforce temperature-group gaps after each shift.
- * A failed gap does not stop the search.
+ * With `slidePrep`, hands-on prep slides earlier inside the hold window before
+ * a whole-dish shift. When `order` is set, re-enforce temperature-group gaps
+ * after each shift. A failed gap does not stop the search.
  */
 function resolveByShifting(
   placements: Placement[],
@@ -967,6 +989,7 @@ function resolveByShifting(
   input: SolverInput,
   order: number[] | null = null,
   nowMs = 0,
+  slidePrep = true,
 ): Conflict[] {
   let activeOrder = order;
   const maxPasses = 500;
@@ -979,7 +1002,7 @@ function resolveByShifting(
     if (conflicts.length === 0) return [];
 
     const conflict = conflicts[0]!;
-    if (conflict.type === "hands_on" && advancePrepLead(placements, nowMs)) {
+    if (slidePrep && conflict.type === "hands_on" && advancePrepLead(placements, nowMs)) {
       continue;
     }
     // For oven conflicts, prefer shifting the earlier-finishing dish (usually the one that should move forward).
@@ -1094,7 +1117,16 @@ function searchSequencing(
   let bestKey = "";
   let bestFail: { placements: Placement[]; conflicts: Conflict[] } | null = null;
 
-  for (const order of orders) {
+  // Two ways to clear a hands-on clash, tried for every order: slide prep
+  // earlier first, or shift whole dishes and leave prep where it is. Neither one finds every plan.
+  // Sliding prep first spent both potato dishes' hold on the Sunday roast with
+  // one oven, which d47c48a then refused; shifting whole dishes fits it, as
+  // 7eb48cb did. The latest-starting feasible plan of all attempts is kept.
+  const attempts = orders.flatMap((order) => [
+    { order, slidePrep: true },
+    { order, slidePrep: false },
+  ]);
+  for (const { order, slidePrep } of attempts) {
     const placements = clonePlacements(base);
     const ordered = applyTempGroupOrder(placements, order, serveMs, input);
     if (!ordered) {
@@ -1103,11 +1135,11 @@ function searchSequencing(
       assignOvens(placements, input.ovens, rackCount(input));
     }
     const activeOrder = ordered ? order : null;
-    let conflicts = resolveByShifting(placements, serveMs, input, activeOrder, nowMs);
+    let conflicts = resolveByShifting(placements, serveMs, input, activeOrder, nowMs, slidePrep);
     // Re-pack sides into rest windows after shifts, then resolve again.
     if (ordered && (conflicts.length === 0 || conflicts.every((c) => c.type !== "hold"))) {
       packGroupsAfterPrior(placements, order, serveMs, input);
-      conflicts = resolveByShifting(placements, serveMs, input, order, nowMs);
+      conflicts = resolveByShifting(placements, serveMs, input, order, nowMs, slidePrep);
     }
     if (conflicts.length === 0) {
       const start = earliestPlanStart(placements, input);
@@ -1238,20 +1270,42 @@ export function solveMeal(
 
   if (searched.conflicts.length > 0) {
     const allConflicts = findConflicts(placements, serveMs, input);
-    const conflicts = allConflicts.length > 0 ? allConflicts : searched.conflicts;
+    let conflicts = allConflicts.length > 0 ? allConflicts : searched.conflicts;
     const conflict = conflicts[0]!;
-    const question = conflictQuestion(conflict, placements);
+    let question = conflictQuestion(conflict, placements);
+    let reason = conflict.detail;
+    // One oven, an oven clash: ask the question that is true. Which clash the
+    // search stops on depends on the attempt (Thanksgiving with one oven said
+    // "oven_temp" at d47c48a and "oven_racks" with 350 F rolls). If the same
+    // menu, cooks and burners fit with a second oven, the oven is what is short.
+    const ovenClashes = conflicts.filter((c) => c.type === "oven_temp" || c.type === "oven_racks");
+    if (input.ovens === 1 && ovenClashes.length > 0) {
+      const two = { ...input, ovens: 2 };
+      const withTwo = searchSequencing(clonePlacements(basePlacements), serveMs, two, nowMs);
+      if (withTwo.conflicts.length === 0 && earliestPlanStart(withTwo.placements, two) >= nowMs - 500) {
+        const bakes = new Map<string, string[]>();
+        for (const p of placements) {
+          if (p.dish.appliance !== "oven" || p.dish.cook_min <= 0) continue;
+          const label = tempLabel(p.dish.oven_temp, input.units) ?? "its temperature";
+          bakes.set(label, [...(bakes.get(label) ?? []), p.dish.name]);
+        }
+        const parts = [...bakes.entries()].map(([temp, names]) => `${listNames(names)} at ${temp}`);
+        reason = "One oven cannot fit these bakes in time. With a second oven the plan fits.";
+        question = `One oven cannot bake ${parts.join(" and ")} in time for ${formatLocalTime(serveMs, input.timezone)}. Is a second oven free?`;
+        conflicts = ovenClashes;
+      }
+    }
     const timeline = buildSteps(placements, serveMs, input);
     const steps = keepDraftSteps ? timeline : [];
     return {
       feasible: false,
-      reason: conflict.detail,
+      reason,
       question,
       conflicts: toPlanConflicts(conflicts),
       steps,
       warnings,
       summary: draftSummary(question),
-      card: buildCard(steps, false, warnings),
+      card: buildCard(steps, false, warnings, input.ovens),
       serve_at_local: formatLocalTime(serveMs, input.timezone),
       timezone: input.timezone,
     };
@@ -1274,7 +1328,7 @@ export function solveMeal(
       steps,
       warnings,
       summary: draftSummary(q),
-      card: buildCard(steps, false, warnings),
+      card: buildCard(steps, false, warnings, input.ovens),
       serve_at_local: formatLocalTime(serveMs, input.timezone),
       timezone: input.timezone,
     };
@@ -1289,7 +1343,7 @@ export function solveMeal(
     steps,
     warnings,
     summary,
-    card: buildCard(steps, true, warnings),
+    card: buildCard(steps, true, warnings, input.ovens),
     serve_at_local: formatLocalTime(serveMs, input.timezone),
     timezone: input.timezone,
   };
@@ -1383,19 +1437,16 @@ export function applyRunningLate(
   const plan = solveMeal(pushed, nowMs, { keepDraftSteps: true });
   const blocking = (plan.conflicts ?? []).filter((c) => c.type !== "past_start");
   if (plan.feasible || blocking.length === 0) {
+    // It fits: a timeline, not a draft. Work before now is done or in
+    // progress, so a start before now (past_start) is not a reason to refuse.
     const steps = clipStepsAtNow(plan.steps, nowMs, raw.timezone);
-    const q = `Push dinner to ${proposedLocal}?`;
     const noteWarnings = plan.warnings.length ? plan.warnings : warnings;
     return {
-      ...plan,
-      feasible: false,
-      reason: `${name} is ${minutes} minutes late.`,
-      question: q,
-      conflicts: undefined,
+      feasible: true,
       steps,
       warnings: noteWarnings,
-      summary: draftSummary(q),
-      card: buildCard(steps, false, noteWarnings),
+      summary: `${name} is ${minutes} minutes late. Dinner moves to ${proposedLocal}. ${DONENESS}`,
+      card: buildCard(steps, true, noteWarnings, Math.max(1, Math.min(2, raw.ovens))),
       serve_at_local: proposedLocal,
       timezone: raw.timezone,
     };

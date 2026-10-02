@@ -162,14 +162,14 @@
       "hands_on": [
         { "offset_min": 0, "minutes": 15, "label": "shape rolls" }
       ],
-      "cook_min": { "typical": 18, "low": 15, "high": 22 },
+      "cook_min": { "typical": 22, "low": 20, "high": 25 },
       "appliance": "oven",
-      "oven_temp": { "f": 375, "c": 190 },
+      "oven_temp": { "f": 350, "c": 175 },
       "oven_units": 1,
       "burners": 0,
       "rest_min": 0,
       "hold_min": 20,
-      "proof_min": 20
+      "proof_min": 30
     },
     {
       "id": "gravy",

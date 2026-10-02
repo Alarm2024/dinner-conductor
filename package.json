@@ -1,0 +1,30 @@
+{
+  "name": "dinner-conductor",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "MCP server for Alexa+ that plans the timing of a multi-dish home meal so every dish is ready at serve time.",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test tests/*.test.ts && sh scripts/banned-words.sh",
+    "check:words": "sh scripts/banned-words.sh",
+    "smoke": "sh scripts/smoke.sh"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/node": "^2.1.0",
+    "@modelcontextprotocol/server": "^2.2.0",
+    "tsx": "^4.20.6",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@modelcontextprotocol/client": "^2.2.0",
+    "@modelcontextprotocol/inspector": "^2.8.0",
+    "@types/node": "^22.19.0",
+    "typescript": "^5.9.3"
+  }
+}

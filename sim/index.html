@@ -1,0 +1,491 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>dinner-conductor — simulated Alexa+ page</title>
+  <style>
+    :root {
+      --ink: #1a2421;
+      --paper: #f3efe6;
+      --panel: #e7e0d2;
+      --accent: #2f6f5e;
+      --accent-ink: #f7faf8;
+      --line: #c9c0b0;
+      --warn: #8a4b2a;
+      font-family: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background:
+        radial-gradient(ellipse at top, #fff8ea 0%, transparent 55%),
+        linear-gradient(160deg, #efe8da, #d9e2dc 55%, #cfd9d3);
+      min-height: 100vh;
+    }
+    .banner {
+      background: #2c3330;
+      color: #f4f1ea;
+      text-align: center;
+      padding: 0.65rem 1rem;
+      font-family: "Segoe UI", "Helvetica Neue", sans-serif;
+      font-size: 0.9rem;
+      letter-spacing: 0.02em;
+    }
+    main {
+      max-width: 820px;
+      margin: 0 auto;
+      padding: 1.25rem 1rem 3rem;
+    }
+    h1 {
+      font-size: clamp(1.8rem, 4vw, 2.4rem);
+      font-weight: 600;
+      margin: 1rem 0 0.35rem;
+      letter-spacing: -0.02em;
+    }
+    .lede {
+      margin: 0 0 1.25rem;
+      max-width: 40rem;
+      opacity: 0.85;
+    }
+    .panel {
+      background: color-mix(in srgb, var(--panel) 88%, white);
+      border: 1px solid var(--line);
+      padding: 1rem;
+      margin: 0.9rem 0;
+    }
+    .panel h2 {
+      margin: 0 0 0.6rem;
+      font-size: 1.05rem;
+      font-family: "Segoe UI", "Helvetica Neue", sans-serif;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--accent);
+    }
+    label.field {
+      display: block;
+      font-family: "Segoe UI", "Helvetica Neue", sans-serif;
+      font-size: 0.85rem;
+      margin-bottom: 0.35rem;
+    }
+    textarea, input[type="text"] {
+      width: 100%;
+      font: inherit;
+      padding: 0.65rem 0.75rem;
+      border: 1px solid var(--line);
+      background: #fffcf6;
+      color: var(--ink);
+    }
+    textarea { min-height: 4.5rem; resize: vertical; }
+    .row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+      margin-top: 0.75rem;
+      align-items: center;
+    }
+    button {
+      font-family: "Segoe UI", "Helvetica Neue", sans-serif;
+      font-size: 0.95rem;
+      padding: 0.55rem 0.9rem;
+      border: 1px solid var(--accent);
+      background: var(--accent);
+      color: var(--accent-ink);
+      cursor: pointer;
+    }
+    button.secondary {
+      background: transparent;
+      color: var(--accent);
+    }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    .clock {
+      font-family: "Segoe UI", "Helvetica Neue", sans-serif;
+      font-variant-numeric: tabular-nums;
+      font-size: 1.6rem;
+      font-weight: 600;
+    }
+    .speed button[aria-pressed="true"] {
+      outline: 2px solid var(--ink);
+      outline-offset: 2px;
+    }
+    #summary {
+      font-size: 1.15rem;
+      line-height: 1.45;
+      min-height: 3rem;
+      white-space: pre-wrap;
+    }
+    #card {
+      font-family: "Segoe UI", "Helvetica Neue", sans-serif;
+      font-size: 0.95rem;
+      line-height: 1.5;
+      white-space: pre-wrap;
+      margin: 0;
+    }
+    #router-log {
+      font-family: "Segoe UI", "Helvetica Neue", sans-serif;
+      font-size: 0.85rem;
+      opacity: 0.8;
+      min-height: 1.2rem;
+    }
+    details {
+      margin-top: 0.75rem;
+      font-family: "Segoe UI", "Helvetica Neue", sans-serif;
+      font-size: 0.85rem;
+    }
+    #raw {
+      white-space: pre-wrap;
+      word-break: break-word;
+      font-size: 0.75rem;
+      opacity: 0.75;
+    }
+    .phrases {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.4rem;
+    }
+    .phrases button {
+      background: #fffcf6;
+      color: var(--ink);
+      border-color: var(--line);
+      font-size: 0.8rem;
+      padding: 0.4rem 0.6rem;
+    }
+  </style>
+</head>
+<body>
+  <div class="banner">Simulated Alexa+ page - not a real Alexa device.</div>
+  <main>
+    <h1>dinner-conductor</h1>
+    <p class="lede">Plan multi-dish meal timing through the MCP tools on this same origin. Your recipe's times win. Out of scope: allergy, nutrition, diet, and food-safety questions.</p>
+
+    <section class="panel" aria-labelledby="clock-title">
+      <h2 id="clock-title">Simulated clock</h2>
+      <div class="clock" id="clock">18:00</div>
+      <div class="row speed" role="group" aria-label="Clock speed">
+        <button type="button" data-speed="1" aria-pressed="true">1x</button>
+        <button type="button" data-speed="10" aria-pressed="false">10x</button>
+        <button type="button" data-speed="60" aria-pressed="false">60x</button>
+        <button type="button" class="secondary" id="set-now">Jump to 16:00</button>
+      </div>
+    </section>
+
+    <section class="panel" aria-labelledby="ask-title">
+      <h2 id="ask-title">Ask</h2>
+      <label class="field" for="input">Text or spoken request</label>
+      <textarea id="input" placeholder="Plan dinner with turkey breast, stuffing, and mashed potatoes at 4"></textarea>
+      <div class="row">
+        <button type="button" id="send">Send</button>
+        <button type="button" class="secondary" id="mic">Mic</button>
+        <label><input type="checkbox" id="speak" checked /> Speak summary</label>
+      </div>
+      <p id="router-log" role="status"></p>
+      <p class="field" style="margin-top:0.8rem">Demo phrases (scripted router)</p>
+      <div class="phrases" id="phrases"></div>
+    </section>
+
+    <section class="panel" aria-labelledby="summary-title">
+      <h2 id="summary-title">Spoken summary</h2>
+      <div id="summary">Ask for a meal plan to begin.</div>
+    </section>
+
+    <section class="panel" aria-labelledby="card-title">
+      <h2 id="card-title">Timeline card</h2>
+      <pre id="card">No plan yet.</pre>
+      <details>
+        <summary>raw MCP result</summary>
+        <pre id="raw"></pre>
+      </details>
+    </section>
+  </main>
+
+  <script>
+    const DEMO_PHRASES = [
+      "Plan dinner with chicken thighs, roast potatoes, and green beans at 6",
+      "Plan a holiday meal with turkey breast, stuffing, mashed potatoes, green bean casserole, dinner rolls, and gravy at 4 with 1 oven",
+      "What's next?",
+      "Read the plan",
+      "Running late on roast potatoes by 10 minutes",
+      "Add salad and remove green beans",
+      "Find dish lasagna",
+    ];
+
+    const state = {
+      planId: null,
+      planToken: null,
+      speed: 1,
+      clockMs: null,
+      timezone: "America/New_York",
+      rpcId: 1,
+      initialized: false,
+    };
+
+    const el = (id) => document.getElementById(id);
+    const summaryEl = el("summary");
+    const cardEl = el("card");
+    const rawEl = el("raw");
+    const clockEl = el("clock");
+    const inputEl = el("input");
+    const routerLog = el("router-log");
+
+    function formatClock(ms) {
+      return new Intl.DateTimeFormat("en-GB", {
+        timeZone: state.timezone,
+        hour: "2-digit",
+        minute: "2-digit",
+        hourCycle: "h23",
+      }).format(new Date(ms));
+    }
+
+    function seedClock() {
+      // Anchor simulated "now" at 16:00 on a fixed day in the meal timezone.
+      const parts = new Intl.DateTimeFormat("en-US", {
+        timeZone: state.timezone,
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+      }).formatToParts(new Date());
+      const map = Object.fromEntries(parts.filter((p) => p.type !== "literal").map((p) => [p.type, p.value]));
+      // Approximate local 16:00 as UTC then adjust via formatter loop.
+      let guess = Date.UTC(Number(map.year), Number(map.month) - 1, Number(map.day), 21, 0, 0);
+      for (let i = 0; i < 3; i++) {
+        const local = formatClock(guess);
+        const [hh, mm] = local.split(":").map(Number);
+        const delta = (16 * 60) - (hh * 60 + mm);
+        guess += delta * 60_000;
+      }
+      state.clockMs = guess;
+      clockEl.textContent = formatClock(state.clockMs);
+    }
+
+    seedClock();
+
+    setInterval(() => {
+      state.clockMs += 1000 * state.speed;
+      clockEl.textContent = formatClock(state.clockMs);
+    }, 1000);
+
+    document.querySelectorAll("[data-speed]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        state.speed = Number(btn.dataset.speed);
+        document.querySelectorAll("[data-speed]").forEach((b) => b.setAttribute("aria-pressed", String(b === btn)));
+      });
+    });
+
+    el("set-now").addEventListener("click", () => {
+      seedClock();
+      routerLog.textContent = "Clock jumped to 16:00.";
+    });
+
+    const phrases = el("phrases");
+    for (const phrase of DEMO_PHRASES) {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.textContent = phrase;
+      b.addEventListener("click", () => {
+        inputEl.value = phrase;
+        runUtterance(phrase);
+      });
+      phrases.appendChild(b);
+    }
+
+    async function parseRpcBody(response) {
+      const text = await response.text();
+      if (!response.ok) throw new Error("HTTP " + response.status);
+      if (text.trim().startsWith("{")) return JSON.parse(text);
+      const dataLine = text.split("\n").map((l) => l.trim()).find((l) => l.startsWith("data:"));
+      if (!dataLine) throw new Error("Empty MCP response");
+      return JSON.parse(dataLine.slice(5).trim());
+    }
+
+    async function rpc(method, params) {
+      const response = await fetch("/mcp", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          accept: "application/json, text/event-stream",
+          "mcp-protocol-version": "2025-11-25",
+        },
+        body: JSON.stringify({ jsonrpc: "2.0", id: state.rpcId++, method, params }),
+      });
+      return parseRpcBody(response);
+    }
+
+    async function ensureSession() {
+      if (state.initialized) return;
+      await rpc("initialize", {
+        protocolVersion: "2025-11-25",
+        capabilities: {},
+        clientInfo: { name: "dinner-conductor-sim", version: "1.0.0" },
+      });
+      await fetch("/mcp", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          accept: "application/json, text/event-stream",
+          "mcp-protocol-version": "2025-11-25",
+        },
+        body: JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" }),
+      });
+      state.initialized = true;
+    }
+
+    function payloadFromReply(reply) {
+      rawEl.textContent = JSON.stringify(reply, null, 2);
+      if (reply.error) return { summary: "MCP error.", card: [JSON.stringify(reply.error)] };
+      if (reply.result && reply.result.structuredContent) return reply.result.structuredContent;
+      const text = reply.result && reply.result.content && reply.result.content[0]
+        ? reply.result.content[0].text
+        : "{}";
+      try { return JSON.parse(text); } catch { return { summary: text, card: [text] }; }
+    }
+
+    function speakSummary(text) {
+      if (!el("speak").checked || !("speechSynthesis" in window)) return;
+      speechSynthesis.cancel();
+      speechSynthesis.speak(new SpeechSynthesisUtterance(text));
+    }
+
+    function showPayload(payload) {
+      if (payload.plan_id) state.planId = payload.plan_id;
+      if (payload.plan_token) state.planToken = payload.plan_token;
+      const summary = payload.summary || "Done.";
+      summaryEl.textContent = summary;
+      const card = Array.isArray(payload.card) ? payload.card.join("\n") : (payload.card || "");
+      cardEl.textContent = card || "No card.";
+      speakSummary(summary);
+    }
+
+    /** scripted router: map demo phrases to tool calls */
+    function routePhrase(text) {
+      const t = text.trim();
+      const lower = t.toLowerCase();
+
+      let m = lower.match(/^find dish (.+)$/i) || lower.match(/^find (.+)$/i);
+      if (m && !lower.includes("plan")) {
+        return { label: "scripted router → find_dish", name: "find_dish", args: { name: m[1].trim() } };
+      }
+
+      if (/what'?s next/.test(lower)) {
+        return {
+          label: "scripted router → whats_next",
+          name: "whats_next",
+          args: { plan_id: state.planId },
+        };
+      }
+
+      if (/read (the )?plan/.test(lower)) {
+        return { label: "scripted router → read_plan", name: "read_plan", args: { plan_id: state.planId } };
+      }
+
+      m = lower.match(/running late on (.+?) by (\d+) minutes?/);
+      if (m) {
+        return {
+          label: "scripted router → running_late",
+          name: "running_late",
+          args: { plan_id: state.planId, dish: m[1].trim(), minutes: Number(m[2]) },
+        };
+      }
+
+      m = lower.match(/add (.+) and remove (.+)/);
+      if (m) {
+        return {
+          label: "scripted router → change_menu",
+          name: "change_menu",
+          args: {
+            plan_id: state.planId,
+            add: m[1].split(/,| and /).map((s) => s.trim()).filter(Boolean),
+            remove: m[2].split(/,| and /).map((s) => s.trim()).filter(Boolean),
+          },
+        };
+      }
+
+      m = t.match(/plan (?:a holiday meal|dinner) with (.+?) at (\d{1,2})(?::(\d{2}))?(?:\s*(am|pm))?/i);
+      if (m) {
+        const dishPart = m[1].replace(/\s+with \d+\s+oven.*$/i, "").trim();
+        const dishes = dishPart.split(/,| and /).map((s) => s.trim()).filter(Boolean);
+        let hour = Number(m[2]);
+        const minute = m[3] ? Number(m[3]) : 0;
+        const ap = (m[4] || "").toLowerCase();
+        if (ap === "pm" && hour < 12) hour += 12;
+        if (ap === "am" && hour === 12) hour = 0;
+        if (!ap && hour >= 1 && hour <= 11) hour += 12; // dinner: "at 6" → 18:00, "at 7" → 19:00
+        const serve_at = String(hour).padStart(2, "0") + ":" + String(minute).padStart(2, "0");
+        const ovens = /1 oven/i.test(t) ? 1 : /2 oven/i.test(t) ? 2 : 1;
+        return {
+          label: "scripted router → plan_meal",
+          name: "plan_meal",
+          args: {
+            dishes,
+            serve_at,
+            timezone: state.timezone,
+            ovens,
+            cooks: 1,
+            burners: 4,
+            units: "F",
+          },
+        };
+      }
+
+      return null;
+    }
+
+    const TIME_AWARE = new Set(["plan_meal", "whats_next", "running_late", "change_menu"]);
+
+    async function callTool(name, args) {
+      if (TIME_AWARE.has(name)) args = { ...args, now: new Date(state.clockMs).toISOString() };
+      await ensureSession();
+      const reply = await rpc("tools/call", { name, arguments: args });
+      return payloadFromReply(reply);
+    }
+
+    async function runUtterance(text) {
+      summaryEl.textContent = "…";
+      try {
+        const routed = routePhrase(text);
+        if (!routed) {
+          routerLog.textContent = "scripted router: no match. Try a demo phrase.";
+          summaryEl.textContent = "I did not match that phrase. Pick a demo phrase or use the same shape.";
+          return;
+        }
+        if ((routed.name === "whats_next" || routed.name === "read_plan" || routed.name === "running_late" || routed.name === "change_menu") && !state.planId) {
+          routerLog.textContent = routed.label + " (needs a plan first)";
+          summaryEl.textContent = "Plan a meal first, then ask again.";
+          return;
+        }
+        routerLog.textContent = routed.label;
+        const payload = await callTool(routed.name, routed.args);
+        showPayload(payload);
+      } catch (error) {
+        summaryEl.textContent = String(error && error.message ? error.message : error);
+      }
+    }
+
+    el("send").addEventListener("click", () => runUtterance(inputEl.value));
+    inputEl.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) runUtterance(inputEl.value);
+    });
+
+    el("mic").addEventListener("click", () => {
+      const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+      if (!SR) {
+        routerLog.textContent = "Mic is not supported in this browser.";
+        return;
+      }
+      const rec = new SR();
+      rec.lang = "en-US";
+      rec.onresult = (ev) => {
+        const heard = ev.results[0][0].transcript;
+        inputEl.value = heard;
+        runUtterance(heard);
+      };
+      rec.onerror = () => {
+        routerLog.textContent = "Mic error.";
+      };
+      rec.start();
+      routerLog.textContent = "Listening…";
+    });
+  </script>
+</body>
+</html>
